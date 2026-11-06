@@ -1,0 +1,10 @@
+services:
+  - type: web
+    name: cyberpunk2077-web
+    runtime: python
+    plan: free
+    buildCommand: ""
+    startCommand: python serve.py
+    envVars:
+      - key: PYTHON_VERSION
+        value: 3.11.0

@@ -1,0 +1,2133 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <script>/* [plan-b] cross-origin asset prelude (cloudflare/public/loading/xo-prelude.js) */
+// Plan B cross-origin prelude (inlined first in the Vercel /game page by scripts/make-vercel-page.mjs).
+// The page lives on another site (cyberpunk2077.lol); every engine/game URL the runtime builds as a
+// same-origin absolute path (/runtime/..., /game/archive|engine|r6/..., /sdk/...) is rewritten to the
+// Cloudflare Worker as <cf>/k/<ACCESS_TOKEN>/<path> (token in the path: relative module imports keep it).
+// Workers: same-origin blob trampolines that install this prelude, then importScripts / import the CF script.
+// Both functions must stay self-contained: their source text is shipped into every trampoline.
+function __cpXoInstall(cfg) {
+  var G = globalThis;
+  if (G.__cpXo) return;
+  G.__cpXo = cfg;
+  var RE = /^\/(runtime\/|game\/(archive|engine|r6)\/|sdk\/)/;
+  function abs(u) {                                   // never resolve against blob: base URLs
+    u = String(u && u.href !== undefined ? u.href : u);
+    if (u.charAt(0) === "/" && u.charAt(1) !== "/") return cfg.pageOrigin + u;
+    if (/^[a-z][a-z0-9+.-]*:/i.test(u)) return u;
+    try { return new URL(u, G.location.href).href; } catch (e) { return u; }
+  }
+  function map(u) {                                   // -> CF URL or null
+    var a = abs(u);
+    if (a.indexOf(cfg.cfOrigin + "/") === 0) return a;
+    if (a.indexOf(cfg.pageOrigin + "/") !== 0) return null;
+    var rest = a.slice(cfg.pageOrigin.length), path = rest.split(/[?#]/)[0];
+    return RE.test(path) ? cfg.base + rest : null;
+  }
+  G.__cpXoMap = map;
+  // fetch
+  if (G.fetch) {
+    var F = G.fetch;
+    G.fetch = function (input, init) {
+      try {
+        if (typeof input === "string" || input instanceof URL) { var m = map(input); if (m && m !== abs(input)) input = m; }
+        else if (input && input.url) { var r = map(input.url); if (r && r !== input.url) input = new Request(r, input); }
+      } catch (e) {}
+      var p = F.call(this, input, init);
+      // [io=shared] count /game/ bytes fetched by worker-side fetch (io2 prefetch helper) for the loader readout
+      if (cfg.countFetch && typeof G.WorkerGlobalScope !== "undefined" && typeof G.BroadcastChannel !== "undefined") {
+        var u = String(input && input.url || input);
+        if (u.indexOf("/game/") >= 0) p = p.then(function (r) {
+          if (!r.body || typeof TransformStream === "undefined") return r;
+          var C = G.__cpXoIo || (G.__cpXoIo = {bc: new BroadcastChannel("cp2077-loader-io"), id: "f" + Math.random().toString(36).slice(2), bytes: 0, last: 0});
+          var ts = new TransformStream({transform: function (chunk, ctl) {
+            C.bytes += chunk.byteLength; var now = Date.now();
+            if (now - C.last >= 500) { C.last = now; try { C.bc.postMessage({id: C.id, bytes: C.bytes}); } catch (e) {} }
+            ctl.enqueue(chunk);
+          }, flush: function () { try { C.bc.postMessage({id: C.id, bytes: C.bytes}); } catch (e) {} }});
+          return new Response(r.body.pipeThrough(ts), {status: r.status, statusText: r.statusText, headers: r.headers});
+        });
+      }
+      return p;
+    };
+  }
+  // XMLHttpRequest (sync reads from pthreads included)
+  if (G.XMLHttpRequest) {
+    var XP = G.XMLHttpRequest.prototype, XO = XP.open;
+    XP.open = function (method, url) {
+      var args = Array.prototype.slice.call(arguments);
+      try { var m = map(url); if (m) args[1] = m; } catch (e) {}
+      return XO.apply(this, args);
+    };
+  }
+  // importScripts (classic workers)
+  if (typeof G.importScripts === "function") {
+    var IS = G.importScripts;
+    G.importScripts = function () {
+      var a = Array.prototype.map.call(arguments, function (u) { var m = map(u); return m || u; });
+      return IS.apply(this, a);
+    };
+  }
+  // Classic worker scripts with RELATIVE dynamic import() (bink-decoder-worker.js: import("./cached-bink-movie-web.mjs")).
+  // importScripts() of a cross-origin script makes it "muted": its import() base URL is about:blank. So fetch the
+  // text with CORS, make relative import() specifiers absolute against the script's own CF URL, and run it from a
+  // same-origin blob. Absolute import(...) URLs (rewritten in postMessage below) and importScripts keep working.
+  G.__cpXoLoadPatched = function (t) {
+    var x = new G.XMLHttpRequest();
+    x.open("GET", t, false);
+    x.send();
+    if (x.status !== 200) throw new Error("worker script " + x.status + " " + t);
+    var text = x.responseText.replace(/\bimport\(\s*(["'])(\.\.?\/[^"']+)\1\s*\)/g, function (m, q, p) {
+      return "import(" + JSON.stringify(new URL(p, t).href) + ")";
+    });
+    G.importScripts(URL.createObjectURL(new Blob([text + "\n//# sourceURL=" + t], {type: "text/javascript"})));
+  };
+  var PATCH_IMPORTS = /\/runtime\/codec\/[^?#]*\.js(\?|#|$)/;
+  // Worker: CF or rewritable script URLs -> same-origin blob trampoline
+  if (G.Worker) {
+    var W = G.Worker;
+    var src = cfg.src;
+    var conf = function () { return JSON.stringify(cfg); };
+    var NW = function (url, opts) {
+      var s = String(url && url.href !== undefined ? url.href : url);
+      var target = s.indexOf("blob:") === 0 ? null : map(s);
+      if (!target) return new W(url, opts);
+      var module = opts && opts.type === "module", code;
+      if (module) {
+        var pre = URL.createObjectURL(new Blob([src + "\n__cpXoInstall(" + conf() + ");\n"], {type: "text/javascript"}));
+        code = "import " + JSON.stringify(pre) + ";\nimport " + JSON.stringify(target) + ";\n";
+      } else code = src + "\n__cpXoInstall(" + conf() + ");\n" +
+        // [io=shared] the io bundle reads its switches from self.location.search: expose the script URL's query
+        (cfg.locShim ? "(function(t){try{var u=new URL(t);if(!u.search)return;var L=self.location;var o={href:u.href,search:u.search,hash:'',pathname:u.pathname,origin:L.origin,protocol:L.protocol,host:L.host,hostname:L.hostname,port:L.port,toString:function(){return u.href}};Object.defineProperty(self,'location',{configurable:true,enumerable:true,get:function(){return o}})}catch(e){}})(" + JSON.stringify(target) + ");\n" : "") +
+        (PATCH_IMPORTS.test(target) ? "__cpXoLoadPatched(" : "importScripts(") + JSON.stringify(target) + ");\n";
+      var w = new W(URL.createObjectURL(new Blob([code], {type: "text/javascript"})), opts);
+      // Messages that carry script URLs (Bink worker: runtimeUrl, vmUrl, ...) -> absolute CF URLs.
+      var P = w.postMessage;
+      w.postMessage = function (msg) {
+        try {
+          if (msg && typeof msg === "object" && Object.prototype.toString.call(msg) === "[object Object]" && !Array.isArray(msg)) {
+            var copy = null;
+            for (var k in msg) {
+              var v = msg[k];
+              if (typeof v === "string" && /Url$/.test(k)) { var m = map(v); if (m) { copy = copy || Object.assign({}, msg); copy[k] = m; } }
+            }
+            if (copy) { var a = Array.prototype.slice.call(arguments); a[0] = copy; return P.apply(this, a); }
+          }
+        } catch (e) {}
+        return P.apply(this, arguments);
+      };
+      return w;
+    };
+    NW.prototype = W.prototype;
+    G.Worker = NW;
+  }
+}
+// Page bootstrap (main thread only).
+//  - Bare /game boots the ORIGINAL flow (start screen -> main menu -> New Game). ?start=nomadfree = opt-in sandbox.
+//  - Access code: ?key=<code> (shortcut link) or the code-entry panel; validated with ONE HEAD to the Worker,
+//    stored in localStorage, then the page reloads straight into loading. Wrong code -> "Access denied".
+//    Without a valid code no engine script is requested (CPB stays null).
+function __cpXoBoot(opts) {
+  // [cdn-fallback] 2026-10-22: the asset origin may be a new hostname (cdn.cyberpunk2077.lol) that some DNS resolvers
+  // do not know yet. One synchronous probe before anything is requested: if the primary origin does not answer,
+  // use the fallback origin (workers.dev) for the whole page. NXDOMAIN fails fast; ?cf=fallback forces it.
+  if (opts.cfFallback) {
+    var useFallback = new URLSearchParams(location.search).get("cf") === "fallback";
+    if (!useFallback) {
+      try { var px = new XMLHttpRequest(); px.open("GET", opts.cfOrigin + "/__launch?p=" + Date.now(), false); px.send(); if (px.status !== 200) useFallback = true; }
+      catch (e) { useFallback = true; }
+    }
+    if (useFallback) opts = {cfOrigin: opts.cfFallback};
+    globalThis.cp2077CfOrigin = opts.cfOrigin;
+  }
+  var q = new URLSearchParams(location.search), key = q.get("key"), store = "cp2077_link_key", changed = false;
+  // [ask-always] user 2026-10-22: until the countdown ends every visit asks for the code. Never remember it: an
+  // entered code only survives the one reload that starts loading (one-shot sessionStorage), and an old stored code
+  // is wiped. ?key= works for that page load only.
+  var once = "cp2077_code_once";
+  try { localStorage.removeItem(store); } catch (e) {}
+  if (!key) { try { key = sessionStorage.getItem(once); sessionStorage.removeItem(once); } catch (e) {} }
+  if (q.has("key")) { q.delete("key"); changed = true; }
+  if (changed) { try { history.replaceState(history.state, "", location.pathname + (q.toString() ? "?" + q : "") + location.hash); } catch (e) {} }
+  var probe = function (code) { return fetch(opts.cfOrigin + "/k/" + encodeURIComponent(code) + "/runtime/game-files.json", {method: "HEAD", cache: "no-store"}); };
+  var forget = function () { try { localStorage.removeItem(store); } catch (e) {} };
+  var whenDom = function (f) { if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", f); else f(); };
+  function codePanel(message) {
+    globalThis.cp2077LoaderPreError = null;
+    whenDom(function () {
+      var l = document.getElementById("cp-loader"); if (!l || globalThis.CP_UNSUPPORTED) return;   // capcheck.js panel instead
+      l.classList.add("locked");
+      var s = document.getElementById("cp-stage"); if (s) s.textContent = "Access required";
+      var wrap = l.querySelector(".cp-wrap"), f = document.getElementById("cp-code");
+      if (!f) {
+        f = document.createElement("form"); f.id = "cp-code"; f.className = "cp-code"; f.autocomplete = "off";
+        f.innerHTML = '<label for="cp-code-in">EARLY ACCESS CODE</label><div class="cp-code-row"><input id="cp-code-in" type="password" inputmode="text" enterkeyhint="go" spellcheck="false" autocapitalize="off" autocomplete="off" required>' +
+          '<button type="submit">ENTER</button></div><p class="cp-code-msg" id="cp-code-msg" role="alert"></p>';
+        var hint = document.getElementById("cp-hint"); (wrap || l).insertBefore(f, hint ? hint.nextSibling : null);
+        f.addEventListener("submit", function (ev) {
+          ev.preventDefault();
+          var inp = document.getElementById("cp-code-in"), msg = document.getElementById("cp-code-msg"), btn = f.querySelector("button");
+          var code = inp.value.trim(); if (!code) return;
+          btn.disabled = true; msg.className = "cp-code-msg"; msg.textContent = "Checking…";
+          probe(code).then(function (r) {
+            if (r.ok) { try { sessionStorage.setItem(once, code); } catch (e) {} msg.textContent = "Access granted"; location.reload(); return; }
+            msg.className = "cp-code-msg bad"; msg.textContent = r.status === 401 ? "Access denied" : "Server error (" + r.status + "), try again";
+            btn.disabled = false; inp.select();
+          }, function () { msg.className = "cp-code-msg bad"; msg.textContent = "Network error, try again"; btn.disabled = false; });
+        });
+      }
+      var m = document.getElementById("cp-code-msg"); if (m && message) { m.className = "cp-code-msg bad"; m.textContent = message; }
+      var inp = document.getElementById("cp-code-in");
+      if (inp && !inp.cpScroll) {   // phones: keep the field visible above the on-screen keyboard
+        inp.cpScroll = true;
+        var keep = function () { setTimeout(function () {   // only while the on-screen keyboard covers part of the page
+          var vv = globalThis.visualViewport; if (vv && vv.height > innerHeight * 0.85) { try { scrollTo(0, 0); } catch (e) {} return; }
+          try { f.scrollIntoView({block: "center", behavior: "smooth"}); } catch (e) {} }, 250); };
+        inp.addEventListener("blur", function () { setTimeout(function () { try { scrollTo(0, 0); var w = f.closest(".cp-wrap"); if (w) w.scrollTop = 0; } catch (e) {} }, 300); });
+        inp.addEventListener("focus", keep);
+        if (globalThis.visualViewport) visualViewport.addEventListener("resize", function () { if (document.activeElement === inp) keep(); });
+      }
+      if (inp && !matchMedia("(pointer:coarse)").matches) { try { inp.focus({preventScroll: true}); } catch (e) { inp.focus(); } }
+    });
+  }
+  // [launch] user 2026-10-22: no access code for players. Before LAUNCH a countdown replaces the loader; from then
+  // on the public path token "play" (Worker gate) boots the game. A stored/linked code still works (testing).
+  var LAUNCH = Date.parse("2026-10-22T22:00:00Z"), PUB = "play", launchedKey = "cp2077_launched";
+  function countdown() {
+    codePanel("");                                  // early-access code field under the countdown (user 2026-10-22)
+    globalThis.cp2077LoaderPreError = null;
+    var skew = 0, done = false;
+    fetch(opts.cfOrigin + "/__launch", {cache: "no-store"}).then(function (r) { return r.json(); })
+      .then(function (j) { if (j && j.now) { skew = j.now - Date.now(); if (j.launch) LAUNCH = j.launch; } }, function () {});
+    whenDom(function () {
+      var l = document.getElementById("cp-loader"); if (!l || globalThis.CP_UNSUPPORTED) return;
+      l.classList.add("locked", "launch");
+      var st = document.getElementById("cp-stage"); if (st) st.textContent = "Launching soon";
+      var wrap = l.querySelector(".cp-wrap"), c = document.getElementById("cp-count");
+      if (!c) {
+        c = document.createElement("div"); c.id = "cp-count"; c.className = "cp-count"; c.setAttribute("role", "timer");
+        c.innerHTML = '<div class="cp-count-lbl">LAUNCHES IN</div><div class="cp-count-dig" id="cp-count-dig" aria-live="off"></div>' +
+          '<div class="cp-count-when">OCT 22 &middot; 5:00 PM CT</div>';
+        var hint = document.getElementById("cp-hint"); (wrap || l).insertBefore(c, hint ? hint.nextSibling : null);
+      }
+      var dig = document.getElementById("cp-count-dig"), p2 = function (n) { return (n < 10 ? "0" : "") + n; };
+      var u = function (n, t) { return '<span class="u"><b>' + p2(n) + '</b><i>' + t + '</i></span>'; };
+      var tick = function () {
+        if (done) return;
+        var ms = LAUNCH - (Date.now() + skew);
+        if (ms <= 0) {
+          done = true; dig.innerHTML = u(0, "HRS") + u(0, "MIN") + u(0, "SEC");
+          var cf = document.getElementById("cp-code"); if (cf) cf.remove();
+          if (st) st.textContent = "Starting";
+          var go = function () {
+            probe(PUB).then(function (r) {
+              if (r.ok) { try { sessionStorage.setItem(launchedKey, "1"); } catch (e) {} location.reload(); }
+              else setTimeout(go, 3000);
+            }, function () { setTimeout(go, 3000); });
+          };
+          return go();
+        }
+        var t = Math.floor(ms / 1000), d = Math.floor(t / 86400), h = Math.floor(t / 3600) % 24, m = Math.floor(t / 60) % 60, sec = t % 60;
+        dig.innerHTML = (d ? u(d, "DAYS") : "") + u(h, "HRS") + u(m, "MIN") + u(sec, "SEC");
+        setTimeout(tick, 1000 - ((Date.now() + skew) % 1000) + 5);
+      };
+      tick();
+    });
+  }
+  globalThis.CPB = null;
+  var launched = Date.now() >= LAUNCH;
+  try { if (sessionStorage.getItem(launchedKey) === "1") launched = true; else if (sessionStorage.getItem("cp2077_wait") === "1") launched = false; } catch (e) {}   // wait: server said not yet (client clock ahead)
+  if (!key) { if (!launched) return countdown(); key = PUB; }
+  // [one-tab] user 2026-10-22: a second game tab hangs at "Mounting archives" (the first one holds the OPFS cache
+  // files). The newest tab wins: it tells older game tabs to leave (they go to the home page and free the files).
+  try {
+    var bc = new BroadcastChannel("cp2077-game");
+    bc.onmessage = function (e) { if (e.data && e.data.t === "takeover") { try { bc.close(); } catch (x) {} location.replace("/"); } };
+    bc.postMessage({t: "takeover", at: Date.now()});
+  } catch (e) {}
+  var cfg = {cfOrigin: opts.cfOrigin, pageOrigin: location.origin, base: opts.cfOrigin + "/k/" + encodeURIComponent(key)};
+  // ?engine= / ?io=shared selection lives in engine-select.js (runs after this); it sets cfg.locShim/countFetch
+  // through globalThis.__cpXo before any worker exists.
+  cfg.src = __cpXoInstall.toString();
+  globalThis.CPB = cfg.base;
+  __cpXoInstall(cfg);
+  probe(key).then(function (r) {                   // stale/revoked stored code: back to the panel
+    if (r.status === 401) { forget(); location.reload(); }      // stale stored code: fall back to the public launch flow
+    else if (r.status === 403 && key === PUB) { try { sessionStorage.removeItem(launchedKey); sessionStorage.setItem("cp2077_wait", "1"); } catch (e) {} globalThis.CPB = null; location.reload(); }
+  }, function () {});
+}
+
+__cpXoBoot({"cfOrigin":"https://cdn.cyberpunk2077.lol","cfFallback":"https://cp2077-port.fn-web-worker.workers.dev"});
+  </script>
+  <style>:root{--cp-logo-url:url(/game/logo.png)}</style>
+  <link rel="icon" type="image/png" sizes="32x32" href="/assets/icon-32.png" />
+  <link rel="icon" type="image/png" sizes="512x512" href="/assets/icon-512.png" />
+  <link rel="apple-touch-icon" href="/assets/icon-180.png" />
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Cyberpunk 2077 Browser</title>
+  <style>
+    html,body{margin:0;width:100%;height:100%;overflow:hidden;background:#000}
+    body{display:flex;align-items:center;justify-content:center}
+    canvas{display:block;width:min(100vw,177.777778vh);height:min(100vh,56.25vw)}
+  </style>
+  <!-- [cloudflare loader] R2 copy only (scripts/make-r2-page.mjs) -->
+  <script>document.documentElement.classList.add('cp-loading');if(!/[?&]debug=1(&|$)/.test(location.search))document.documentElement.classList.add('cp-nodebug');</script>
+  <script>/* [engine-select] public/loading/engine-select.js */
+// Engine bundle selection (inlined into <head> of the R2 page and the Vercel /game page by make-r2-page.mjs).
+//   (no switch)           SITE DEFAULT: cf609c6825cd1e077df0839ee499e470d30cdc1126c4958c446691b14fe2990a with its io params (out/site-default-bundle.json;
+//                         promote-bundle.mjs). Without params the page's classic bundle boots as-is.
+//   ?io=classic           opt-out: the classic bundle (2942ad1a30a3f73351868818010eab00d57d051ef956081c609a3e24134dfaea), no io params
+//   ?engine=<64-hex sha>  boot that bundle from R2 runtime/engine-versions/<sha>/ (test builds; no io params added)
+//   ?io=shared            io3 shared-cache bundle (30ceeb825e0e2277b57615d970c0171f45dfb0481373af944d1ecdcd3c487330) with ioShared=1&ioSharedMB=128&ioInflight=4
+//   (no memory64)         [w32] browsers without 64-bit WebAssembly (iPhone/iPad Safari) but with wasm threads,
+//                         cross-origin isolation, SharedArrayBuffer and WebGPU boot the wasm32 bundle "64651401b7a00077e7b09b9df980d6f3cbfac382e06920ed71ac08c738ab8696"
+//                         with its params (out/site-default-bundle.json "w32", e.g. mem=ios); capcheck.js then skips
+//                         only its memory64 test (CP_ENGINE_W32). Explicit ?engine= / ?io= still win.
+//   ?io=stream            io6 bundle (e199e2407a6b8608b4335953185c3d6284d961faefff1413d778a40945263987) with the above + ioPersist=1&ioPersistMB=6144 (warm lists:
+//                         io6 defaults; OPFS tier in the helper worker, OPFS belongs to the page's origin)
+// The page query is forwarded to the pthread workers through the engine script URL (CP_ENGINE_Q), and on the
+// cross-origin page the worker stubs expose it as location.search (cfg.locShim). Explicit URL params always win.
+(function () {
+  var q = new URLSearchParams(location.search), HEX = /^[0-9a-f]{64}$/;
+  var IO = "30ceeb825e0e2277b57615d970c0171f45dfb0481373af944d1ecdcd3c487330", IO_STREAM = "e199e2407a6b8608b4335953185c3d6284d961faefff1413d778a40945263987", DEF = "cf609c6825cd1e077df0839ee499e470d30cdc1126c4958c446691b14fe2990a", CLASSIC = "2942ad1a30a3f73351868818010eab00d57d051ef956081c609a3e24134dfaea";
+  var DEF_PARAMS = {"ioShared":"1","ioSharedMB":"128","ioInflight":"4","ioPersist":"1","ioPersistMB":"6144","binkRecycle":"1","psoWarm":"0","skipIntro":"1","ioLookahead":"16","behindLoad":"0"};
+  var W32 = "64651401b7a00077e7b09b9df980d6f3cbfac382e06920ed71ac08c738ab8696", W32_PARAMS = {"mem":"ios","binkRecycle":"1","psoWarm":"0","workers":"1","asyncPresent":"0","skipIntro":"1","mlPools":"0","streamMax":"300","ioMB":"50","floodKeep":"2"};   // null when no wasm32 bundle is configured
+  var STREAM_PARAMS = {ioShared: "1", ioSharedMB: "128", ioInflight: "4", ioPersist: "1", ioPersistMB: "6144"};
+  var G = globalThis, sel = null, defs = null, changed = false;
+  G.CP_ENGINE = null; G.CP_ENGINE_Q = ""; G.CP_ENGINE_BLOCK = false; G.CP_ENGINE_W32 = false;
+  var wasmOk = function (b) { try { return typeof WebAssembly === "object" && WebAssembly.validate(new Uint8Array(b)); } catch (err) { return false; } };
+  var noMemory64 = function () { return !wasmOk([0, 0x61, 0x73, 0x6d, 1, 0, 0, 0, 5, 3, 1, 4, 0]); };    // (memory i64 0)
+  var wasm32Ready = function () {                     // shared (threads) wasm memory + isolation + WebGPU
+    return wasmOk([0, 0x61, 0x73, 0x6d, 1, 0, 0, 0, 5, 4, 1, 3, 1, 1]) && !!G.crossOriginIsolated &&
+      typeof SharedArrayBuffer === "function" && !!(G.navigator && navigator.gpu);
+  };
+  var fail = function (m) { G.cp2077LoaderPreError = m; if (G.cp2077LoaderFail) try { G.cp2077LoaderFail(m); } catch (e) {} };
+  var e = q.get("engine"), io = q.get("io");
+  if (e != null) {
+    if (HEX.test(e)) { sel = e; if (q.get("ios") === "1" && W32) { defs = W32_PARAMS; G.CP_ENGINE_W32 = true; } }   // [w32-test] ?ios=1&engine=<sha>: test a wasm32 bundle in iPhone mode
+    else { G.CP_ENGINE_BLOCK = true; return fail("Invalid ?engine= value: it must be a 64-character hex bundle id."); }
+  } else if (io === "classic") {
+    sel = null;                                     // the page's built-in (classic) bundle, no io params
+  } else if (io === "shared") {
+    sel = IO; defs = {ioShared: "1", ioSharedMB: "128", ioInflight: "4"};
+  } else if (io === "stream") {
+    sel = IO_STREAM; defs = STREAM_PARAMS;
+  } else if (W32 && (noMemory64() || location.pathname === "/game/ios" || location.pathname === "/game/ios/" || q.get("ios") === "1") && wasm32Ready()) {   // [ios-route] user 2026-10-22: /game/ios (or ?ios=1) boots the iPhone build + its params on any device
+    sel = W32; defs = W32_PARAMS; G.CP_ENGINE_W32 = true;   // [w32] iPhone/iPad Safari etc.
+  } else if (DEF !== CLASSIC) {
+    sel = DEF; defs = DEF_PARAMS;                   // site default (e.g. io6 + its params)
+  }
+  if (defs) for (var d in defs) if (!q.has(d)) { q.set(d, defs[d]); changed = true; }
+  // [lowmem] 2026-10-24: Android device-lost (GPU process killed) was more common on <= 4 GB phones; there the
+  // wasm64 site default drops two texture mips instead of the [texdrop] default of one (explicit ?texDrop wins).
+  if (sel && sel === DEF && /Android/.test(navigator.userAgent) && (navigator.deviceMemory || 8) <= 4 && !q.has("texDrop")) { q.set("texDrop", "2"); changed = true; }
+  // [androidpotato] 2026-10-24 city A/B (clean paired runs): potato=2 (0.8 render scale, small-object/prop/foliage/decal
+  // distance caps) ~49.6 vs ~44 fps on desktop; phones are far slower, so Android gets it by default (iPhone already does).
+  if (sel && sel === DEF && /Android/.test(navigator.userAgent) && !q.has("potato")) { q.set("potato", "2"); changed = true; }
+  // [warmflood] 2026-10-24 paired runs: floodKeep=1 (loading screen keeps 1 job worker free instead of 2) world load
+  // 5.6-5.8 vs 6.8-7.0 s with local data. First visits are bimodal (~40-55 s or ~85-115 s) whatever floodKeep is
+  // (fixed-harness A/B), so every visit gets 1. Explicit ?floodKeep wins.
+  if (sel && sel === DEF && !q.has("floodKeep")) { q.set("floodKeep", "1"); changed = true; }
+  // [gpulite] loader.js set this after a GPU device loss in this tab: lightest render settings for the retry.
+  var lite = false; try { lite = sessionStorage.getItem("cp2077_gpulite") === "1"; } catch (err) {}
+  if (sel && lite) { if (q.get("potato") !== "3") { q.set("potato", "3"); changed = true; } if (!(+q.get("texDrop") >= 2)) { q.set("texDrop", "2"); changed = true; } }
+  if (changed) { try { history.replaceState(history.state, "", location.pathname + "?" + q + location.hash); } catch (err) {} }
+  if (!sel) return;
+  G.CP_ENGINE = sel;
+  G.CP_ENGINE_Q = "&" + q.toString().replace(/[^\w=&.,%-]/g, "");
+  if (G.__cpXo) { G.__cpXo.locShim = true; G.__cpXo.countFetch = true; }
+  if (G.CPB === null) return;                       // cross-origin page without an access code: nothing loads yet
+  fetch("/runtime/engine-versions/" + sel + "/bundle.json", {cache: "no-store"}).then(function (r) {
+    if (!r.ok) fail("Engine bundle " + sel.slice(0, 12) + "… is not on the server (" + r.status + "). Upload it with scripts/upload-bundle.mjs.");
+  }, function () {});
+})();
+// [w32-telemetry] Boot telemetry for the wasm32/iPhone engine (mem=ios): small JSON progress reports posted to the
+// Worker's /__probe (one object per page load, overwritten each time, cumulative "events"), so a tab that iOS kills
+// still leaves its last state behind. Read back with GET /__upload/probes (admin). No personal data: UA, screen,
+// boot marks, engine memory numbers, error messages. Active when engine-select picked the wasm32 bundle, or with
+// ?mem=ios / ?telemetry=1; ?telemetry=0 turns it off.
+(function () { try {        // never let telemetry break the boot
+  var G = globalThis, q = new URLSearchParams(location.search);
+  if (q.get("telemetry") === "0" || !(G.CP_ENGINE_W32 || q.get("mem") === "ios" || q.get("telemetry") === "1")) return;
+  var URL_ = "https://cp2077-port.fn-web-worker.workers.dev/__probe?id=";
+  var id = "b" + (Math.random().toString(36) + Math.random().toString(36)).replace(/[^a-z0-9]/g, "").slice(0, 11);
+  var t0 = Date.now(), now = function () { return Math.round(performance.now()); };
+  var R = {v: 2, kind: "boot", id: id, ua: navigator.userAgent, t: t0, engine: G.CP_ENGINE, w32: !!G.CP_ENGINE_W32,
+    q: location.search.slice(0, 300), screen: G.screen ? [screen.width, screen.height, G.devicePixelRatio || 1] : null,
+    cores: navigator.hardwareConcurrency || 0, mem: navigator.deviceMemory || 0,
+    stage: "page", seq: 0, events: [], errors: [], tail: [], memPeak: null, last: null, posted: 0};
+  G.cp2077Telemetry = R;
+  var cut = function (s, n) { n = n || 300; s = String(s); return s.length > n ? s.slice(0, n) + "..." : s; };
+  var pending = null, lastPost = 0;
+  // [bigint] 2026-10-23 probes: 728 launches died with "Do not know how to serialize a BigInt": an event value from the
+  // 64-bit engine (wasm64 pointers/sizes are BigInt) reached JSON.stringify, which threw out of the hooked engine/WebGPU
+  // call into the launch. Serialize BigInt as Number and never let the reporter throw into the game.
+  var ser = function (o) { return JSON.stringify(o, function (k, v) { return typeof v === "bigint" ? Number(v) : v; }); };
+  function send() {
+    try { sendUnsafe(); } catch (e) {}
+  }
+  function sendUnsafe() {
+    pending = null; lastPost = Date.now(); R.seq++; R.posted = lastPost - t0; R.uptime = now();
+    var body = ser(R);
+    while (body.length > 60000 && R.events.length > 20) {   // drop the oldest periodic memory samples first
+      var i = -1;
+      for (var k = 0; k < R.events.length; k++) if (R.events[k].k === "mem") { i = k; break; }
+      R.events.splice(i < 0 ? 0 : i, 1); body = ser(R);
+    }
+    if (body.length > 60000) { R.tail = R.tail.slice(-5); R.errors = R.errors.slice(0, 5); body = ser(R); }
+    try {   // first 15 s: sendBeacon (survives an abrupt tab kill best), then fetch keepalive
+      if (!((now() < 15000 || G.CP_ENGINE_W32) && navigator.sendBeacon && navigator.sendBeacon(URL_ + id, body)))   // iOS: beacons throughout
+        fetch(URL_ + id, {method: "POST", mode: "no-cors", headers: {"Content-Type": "text/plain"}, body: body, keepalive: body.length < 60000})
+          .catch(function () {});
+    } catch (e) {}
+  }
+  function post(urgent) {               // coalesce: at most one post per 2 s unless urgent (or in the first 15 s)
+    if (urgent || now() < 15000) { if (pending) clearTimeout(pending); send(); return; }
+    if (pending) return;
+    pending = setTimeout(send, Math.max(0, 2000 - (Date.now() - lastPost)));
+  }
+  function ev(k, data, urgent) {
+    var e = {k: k, ms: now()}; if (data != null) e.d = data;
+    R.events.push(e); if (k !== "mem") R.stage = k; post(urgent);
+  }
+  ev("page", null, true);
+  // [w32-telemetry v3] early boot: pthread workers created, wasm memory size, GPU adapter/device, first submit/frame,
+  // the first engine line (main() running), shader-package lines; a 1 s heartbeat for the first 15 s.
+  var mems = [], workers = 0;
+  var heapMiB = function () { var m = 0; for (var i = 0; i < mems.length; i++) try { m = Math.max(m, mems[i].buffer.byteLength); } catch (e) {} return Math.round(m / 1048576); };
+  R.workers = 0;
+  try {
+    var WK = G.Worker;
+    if (WK) {
+      G.Worker = function (u, o) {
+        var w = o === undefined ? new WK(u) : new WK(u, o);
+        workers++; R.workers = workers;
+        if (workers <= 40) ev("worker", {n: workers, url: String(u).replace(/^.*\//, "").slice(0, 60), heap: heapMiB()}, true);
+        try {   // first message back from the worker = its wasm instance is up (Emscripten "loaded") or it ran
+          var n0 = workers, seen = false;
+          w.addEventListener("message", function (e) {
+            if (seen) return; seen = true;
+            var c = e && e.data && (e.data.cmd || e.data.type); if (n0 <= 40) ev("workerUp", {n: n0, cmd: String(c || "?").slice(0, 20), heap: heapMiB()}, true);
+          });
+          w.addEventListener("error", function (e) { ev("workerError", {n: n0, msg: cut(e && e.message, 160)}, true); });
+        } catch (e) {}
+        return w;
+      };
+      G.Worker.prototype = WK.prototype;
+    }
+    var WM = G.WebAssembly && G.WebAssembly.Memory;
+    if (WM) {
+      G.WebAssembly.Memory = function (d) {
+        var m = new WM(d); mems.push(m);
+        ev("wasmMemory", {initialPages: d && d.initial, maximumPages: d && d.maximum, shared: !!(d && d.shared)}, true);
+        return m;
+      };
+      G.WebAssembly.Memory.prototype = WM.prototype;
+    }
+    var gp = G.navigator && navigator.gpu, ra = gp && gp.requestAdapter;
+    if (ra) gp.requestAdapter = function () {
+      ev("gpuAdapterRequest", null, true);
+      return ra.apply(this, arguments).then(function (a) { ev("gpuAdapter", a ? (a.info ? {vendor: a.info.vendor, arch: a.info.architecture} : 1) : 0, true); return a; },
+        function (err) { ev("gpuAdapterFail", cut(err && err.message || err), true); throw err; });
+    };
+    var Q = G.GPUQueue && G.GPUQueue.prototype, qs = Q && Q.submit, firstSubmit = true;
+    if (qs) Q.submit = function () { if (firstSubmit) { firstSubmit = false; ev("firstSubmit", {heap: heapMiB()}, true); } return qs.apply(this, arguments); };
+    var C = G.GPUCanvasContext && G.GPUCanvasContext.prototype, gct = C && C.getCurrentTexture, firstFrame = true;
+    if (gct) C.getCurrentTexture = function () { if (firstFrame) { firstFrame = false; ev("firstFrame", {heap: heapMiB()}, true); } return gct.apply(this, arguments); };
+  } catch (e) {}
+  var beat = 0, beatTimer = setInterval(function () {
+    if (++beat > (G.CP_ENGINE_W32 || q.get("mem") === "ios" ? 90 : 15)) { clearInterval(beatTimer); return; }   // iOS: 1 s beats for 90 s
+    R.heapMiB = heapMiB(); R.workers = workers;
+    var gg = R.gpu || {}; ev("tick", {s: beat, heap: R.heapMiB, workers: workers, gb: gg.bufMiB, gt: gg.texMiB}, true);
+  }, 1000);
+  var firstEngine = true, shaderLines = 0;
+  // [w32-diag] Rotating iOS diagnostic (one question per reload; localStorage counter, ?diag=1|2|3 forces one):
+  //   1 = instance cost only: compile the engine module, instantiate it on the page with stub imports, then in 5
+  //       workers; run no engine code; hold 25 s.
+  //   2 = execution, single instance: as 1 on the page only, then run the engine's static constructors.
+  //   3 = full boot (normal).
+  var diag = 3;
+  try {
+    var dq = q.get("diag");
+    if (/^[1234]$/.test(dq || "")) diag = +dq;
+    else if (G.CP_ENGINE_W32 && q.get("diag") === "rotate") {   // rotation only on request now (default: full boot)
+      var n = 0; try { n = +(localStorage.getItem("cp2077.iosdiag") || 0); } catch (e) {}
+      diag = (n % 4) + 1;
+      try { localStorage.setItem("cp2077.iosdiag", String(n + 1)); } catch (e) {}
+    }
+  } catch (e) {}
+  R.diag = diag;
+  if (diag === 4 && G.CP_ENGINE_W32) {   // 4 = full boot of the cold-stubbed module (never-profiled functions -> unreachable)
+    G.CP_ENGINE = "0d94cea2065f3063948fc9a92f78d820ced871ce8110f84a1b1480f26ade4541"; R.engine = G.CP_ENGINE;
+  }
+  if (diag !== 3) {
+    G.CP_ENGINE_BLOCK = true;   // the page's engine script tag is not written
+    var note = function (t) {
+      var d = document.getElementById("cp-diag-note");
+      if (!d) { d = document.createElement("div"); d.id = "cp-diag-note";
+        d.style.cssText = "position:fixed;left:12px;right:12px;bottom:16px;z-index:99999;background:#111;color:#f3e600;" +
+          "font:14px/1.4 system-ui,sans-serif;padding:12px 14px;border:1px solid #f3e600;border-radius:8px";
+        (document.body || document.documentElement).appendChild(d); }
+      d.textContent = t;
+    };
+    var stubImports = function (mod, mem) {
+      var env = {}, imp = {};
+      WebAssembly.Module.imports(mod).forEach(function (i) {
+        imp[i.module] = imp[i.module] || {};
+        imp[i.module][i.name] = i.kind === "memory" ? mem : i.kind === "function" ? function () { return 0; } : undefined;
+      });
+      return imp;
+    };
+    var runDiag = async function () {
+      note("Diagnostic run " + diag + "/4 (no game this time). Keep this tab open about 30 s, then reload the page.");
+      for (var wt = 0; !G.CPB && wt < 120; wt++) await new Promise(function (res) { setTimeout(res, 500); });
+      var base = G.CPB, url = base + "/runtime/engine-versions/" + G.CP_ENGINE + "/cp2077.wasm";
+      ev("diag:start", {variant: diag}, true);
+      var mod;
+      try {
+        if (WebAssembly.compileStreaming) mod = await WebAssembly.compileStreaming(fetch(url, {mode: "cors", credentials: "omit"}));
+        else mod = await WebAssembly.compile(await (await fetch(url, {mode: "cors", credentials: "omit"})).arrayBuffer());
+      } catch (e) { ev("diag:compileFail", cut(e && e.message || e), true); note("Diagnostic " + diag + ": download/compile failed. Please reload."); return; }
+      ev("diag:compiled", {heap: heapMiB()}, true);
+      var mem = new WebAssembly.Memory({initial: 3072, maximum: 65536, shared: true}); mems.push(mem);
+      var inst;
+      try { inst = (await WebAssembly.instantiate(mod, stubImports(mod, mem))); }
+      catch (e) { ev("diag:instFail", cut(e && e.message || e), true); return; }
+      ev("diag:instMain", {heap: heapMiB()}, true);
+      if (diag === 1) {
+        var src = "onmessage=function(e){try{var imp={};WebAssembly.Module.imports(e.data.mod).forEach(function(i){imp[i.module]=imp[i.module]||{};" +
+          "imp[i.module][i.name]=i.kind==='memory'?e.data.mem:function(){return 0}});self.keep=new WebAssembly.Instance(e.data.mod,imp);postMessage('up')}catch(x){postMessage('fail '+x)}}";
+        var wurl = URL.createObjectURL(new Blob([src], {type: "text/javascript"}));
+        for (var k = 1; k <= 5; k++) {
+          var r = await new Promise(function (res) { var w = new Worker(wurl); w.onmessage = function (m) { res(String(m.data)); };
+            w.onerror = function (m) { res("error " + (m && m.message)); }; w.postMessage({mod: mod, mem: mem}); (G.__diagWorkers = G.__diagWorkers || []).push(w); });
+          ev("diag:workerInst", {n: k, r: r.slice(0, 80), heap: heapMiB()}, true);
+          await new Promise(function (res) { setTimeout(res, 1500); });
+        }
+      } else {
+        // run the engine's static constructors in ONE worker instance (the page stays responsive; a spin is cut at 25 s)
+        var src2 = "onmessage=function(e){var imp={};WebAssembly.Module.imports(e.data.mod).forEach(function(i){imp[i.module]=imp[i.module]||{};" +
+          "imp[i.module][i.name]=i.kind==='memory'?e.data.mem:function(){return 0}});var ins;try{ins=new WebAssembly.Instance(e.data.mod,imp)}catch(x){postMessage('instfail '+x);return}" +
+          "postMessage('inst');['_emscripten_tls_init','__wasm_call_ctors'].forEach(function(n){var f=ins.exports[n];if(typeof f!=='function'){postMessage('noexport '+n);return}" +
+          "var t=Date.now();postMessage('start '+n);try{f();postMessage('ran '+n+' '+(Date.now()-t)+'ms')}catch(x){postMessage('trap '+n+' '+(Date.now()-t)+'ms '+String(x).slice(0,120))}});postMessage('end')}";
+        var w2 = new Worker(URL.createObjectURL(new Blob([src2], {type: "text/javascript"})));
+        w2.onmessage = function (m) { ev("diag:exec", {m: String(m.data).slice(0, 160), heap: heapMiB()}, true); };
+        w2.onerror = function (m) { ev("diag:execError", cut(m && m.message, 160), true); };
+        w2.postMessage({mod: mod, mem: mem});
+        setTimeout(function () { try { w2.terminate(); ev("diag:execStopped", null, true); } catch (e) {} }, 25000);
+      }
+      for (var s = 0; s < 12; s++) { await new Promise(function (res) { setTimeout(res, 2000); }); ev("diag:alive", {s: (s + 1) * 2, heap: heapMiB()}, true); }
+      ev("diag:done", null, true);
+      note("Diagnostic run " + diag + "/4 finished. Please reload the page.");
+      G.__diagKeep = [mod, inst];
+    };
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", function () { runDiag().catch(function (e) { ev("diag:error", cut(e && e.message || e), true); }); });
+    else runDiag().catch(function (e) { ev("diag:error", cut(e && e.message || e), true); });
+  }
+  var sizeTries = 0; setTimeout(function wasmSize() {   // engine module size as delivered (code-size context for each attempt)
+    try {
+      var L = G.cp2077Loader && G.cp2077Loader.state;   // cross-origin resource timing hides sizes: use the loader's byte count
+      if (L && L.wasmDone && L.wasmBytes) ev("wasmSize", {MiB: Math.round(L.wasmBytes / 104857.6) / 10}, true);
+      else if (++sizeTries < 240) setTimeout(wasmSize, 500);
+    } catch (e) {}
+  }, 500);
+  // Boot marks from loader.js: wasmRequest/wasmResponse/wasmDownloaded/compileStart/compiled/mounted/state:*/menuUi/
+  // sessionActive/ready.
+  var seenMarks = {};
+  function pollMarks() {
+    var m = G.cp2077Loader && G.cp2077Loader.state && G.cp2077Loader.state.marks; if (!m) return;
+    for (var n in m) if (!seenMarks[n]) { seenMarks[n] = 1; R.events.push({k: "mark:" + n, ms: m[n]}); R.stage = n; post(); }
+  }
+  // wasm compile / instantiate of the main-thread engine module (the loader's wrappers chain onto these).
+  var W = G.WebAssembly;
+  if (W) {
+    var wrap = function (name, label) {
+      var f = W[name]; if (typeof f !== "function") return;
+      W[name] = function (src) {
+        var big = false;
+        try {
+          big = !!src && ((typeof Response === "function" && src instanceof Response) || typeof src.then === "function" ||
+            (src.byteLength || 0) > 1048576 || src instanceof W.Module);
+        } catch (e) {}
+        var r = f.apply(this, arguments);
+        if (big) {
+          ev(label + ":start", null);
+          r.then(function () { ev(label + ":done", null, true); }, function (err) { ev(label + ":fail", cut(err && err.message || err), true); });
+        }
+        return r;
+      };
+    };
+    wrap("instantiateStreaming", "wasmInstantiate"); wrap("compileStreaming", "wasmCompile");
+    wrap("instantiate", "wasmInstantiate"); wrap("compile", "wasmCompile");
+  }
+  // Console: engine memory probe numbers, the first 20 real errors (engine stderr info lines start with "CP2077 " or
+  // "[" and only go to the tail ring), and a ring of the last 25 non-periodic lines.
+  var noisy = /phases probe|citycol probe|memory site|malloc site|outer frame probe|audio ring probe|coreplay\] move|cmdlock|cbOrder|allocation wait probe|allocator memory probe/;
+  function onLine(level, a) {
+    try {
+      var s = cut(Array.prototype.map.call(a, function (x) { return x && x.stack ? x.stack : x; }).join(" "), 400);
+      if (/^CP2077 w32 memory probe:/.test(s)) {
+        var o = {};
+        s.replace(/(\w+)=(\d+)/g, function (_, k, v) { o[k.replace(/Bytes$/, "MiB")] = Math.round(Number(v) / 104857.6) / 10; return _; });
+        o.estResidentMiB = Math.round(((o.mallocInUseMiB || 0) + (o.staticImageMiB || 0)) * 10) / 10;
+        R.last = o; if (!R.memPeak || o.estResidentMiB > R.memPeak.estResidentMiB) R.memPeak = o;
+        return;
+      }
+      if (noisy.test(s)) return;
+      R.tail.push(level.charAt(0) + now() + " " + s); if (R.tail.length > 25) R.tail.shift();
+      if (firstEngine && /^CP2077 /.test(s)) { firstEngine = false; ev("engineFirstLine", cut(s, 160), true); }
+      if (/shader (package|pack)|inflate/i.test(s) && shaderLines < 6) { shaderLines++; ev("shaderPkg", cut(s, 200), true); }
+      if (/WebGPU(: device lost| not available)/.test(s)) ev("gpuLost", s, true);
+      else if (/^CP2077 game state probe: phase=active/.test(s) || /^CP2077 w32 menu (scenario|puppets: loading)/.test(s) || /^CP2077 (native initializer begin|static shader cache|\[lazycs\]|async compute pipelines|nobc decode probe: regions=(64|256|1024))/.test(s) || /^CP2077 w32 memory profile/.test(s) ||
+        /^CP2077 (native init job: phase=enter name=(BaseGameEngine\/Initialization\/LoadTweakDB|CGameEngine\/Initialization\/InkSystem|CGameFramework\/(GameInstance|RuntimeScene|StateMachine)|Engine\/InitializationFinished)|loading stage probe: phase=enter)/.test(s)) ev("engine", cut(s, 120), true); // [w32-telemetry v4] init/loading stages
+      else if (level === "error" && R.errors.length < 20 && !/^(CP2077 |\[)/.test(s)) { R.errors.push({ms: now(), s: s}); post(); }
+    } catch (e) {}
+  }
+  ["error", "warn", "log", "debug"].forEach(function (level) {
+    var f = console[level]; if (typeof f !== "function") return;
+    console[level] = function () { onLine(level, arguments); return f.apply(this, arguments); };
+  });
+  G.addEventListener("error", function (e) {
+    ev("onerror", cut((e.message || "") + " @" + String(e.filename || "").replace(/^.*\//, "") + ":" + (e.lineno || 0)), true);
+  });
+  G.addEventListener("unhandledrejection", function (e) { var r = e.reason; ev("rejection", cut(r && ((r.name ? r.name + ": " : "") + (r.message || "") + " | " + (r.stack || "")) || r), true); });
+  G.addEventListener("pagehide", function () { ev("pagehide", null, true); });
+  document.addEventListener("visibilitychange", function () { ev("visibility", document.visibilityState, true); });
+  // [w32-wgsl] Safari rejects function-level @diagnostic(...) attributes ("invalid attribute for function
+  // declaration"): move them to a module-level diagnostic directive (same severity) on the wasm32/iOS path.
+  try {
+    var SD = G.GPUDevice && G.GPUDevice.prototype, csm = SD && SD.createShaderModule, fixed = 0;
+    if (csm && G.CP_ENGINE_W32) SD.createShaderModule = function (d) {
+      try {
+        var code = d && typeof d.code === "string" ? d.code : null;
+        if (code && code.indexOf("@diagnostic(") >= 0) {
+          var dirs = {}, out = code.replace(/@diagnostic\(\s*(\w+)\s*,\s*([\w.]+)\s*\)\s*(?=(?:@[\w]+(?:\([^)]*\))?\s*)*fn\b)/g,
+            function (_, sev, rule) { dirs[rule] = sev; return ""; });
+          var head = ""; for (var r in dirs) head += "diagnostic(" + dirs[r] + ", " + r + ");\n";
+          if (head) { d = Object.assign({}, d, {code: head + out}); if (fixed++ < 3) ev("wgslDiagFix", Object.keys(dirs).join(","), false); }
+        }
+      } catch (e) {}
+      return csm.call(this, d);
+    };
+  } catch (e) {}
+  // WebGPU: device creation, lost reason, first uncaptured errors.
+  try {
+    var A = G.GPUAdapter && G.GPUAdapter.prototype, rd = A && A.requestDevice;
+    if (rd) A.requestDevice = function (desc) {
+      try { var rl = desc && desc.requiredLimits || {}; ev("gpuDeviceRequest", {maxBuf: rl.maxBufferSize, maxStorage: rl.maxStorageBufferBindingSize, heap: heapMiB()}, true); } catch (e) {}
+      return rd.apply(this, arguments).then(function (dev) {
+        try {
+          ev("gpuDevice", {maxBuf: dev.limits.maxBufferSize, maxStorage: dev.limits.maxStorageBufferBindingSize, maxTex2D: dev.limits.maxTextureDimension2D, maxLayers: dev.limits.maxTextureArrayLayers, bc: dev.features.has("texture-compression-bc") ? 1 : 0, etc2: dev.features.has("texture-compression-etc2") ? 1 : 0, astc: dev.features.has("texture-compression-astc") ? 1 : 0, req: (desc && desc.requiredFeatures ? Array.from(desc.requiredFeatures).join(",") : "").slice(0, 120)});
+          dev.lost.then(function (i) { ev("gpuLost", {reason: i.reason, message: cut(i.message)}, true); });
+          var n = 0;
+          dev.addEventListener("uncapturederror", function (e) { if (n++ < 5) ev("gpuError", cut(e.error && e.error.message), true); });
+        } catch (e) {}
+        return dev;
+      }, function (err) { ev("gpuDeviceFail", cut(err && err.message || err), true); throw err; });
+    };
+  } catch (e) {}
+  // WebGPU live bytes (buffers exact, textures estimated from format/size/mips), so the phone's GPU share is visible.
+  var gpu = R.gpu = {bufMiB: 0, texMiB: 0, peakMiB: 0}, gpuB = 0, gpuT = 0, sizes = new WeakMap();
+  try {
+    var D = G.GPUDevice && G.GPUDevice.prototype;
+    var texBytes = function (d) {
+      var f = String(d.format || ""), b = 4, blk = 1;
+      if (/^r8/.test(f)) b = 1; else if (/^(rg8|r16|depth16)/.test(f)) b = 2; else if (/^(rgba16|rg32)/.test(f)) b = 8;
+      else if (/^rgba32/.test(f)) b = 16; else if (/^(bc|etc2|eac|astc)/.test(f)) { blk = 4; b = /^(bc[14]-|etc2-rgb8|eac-r11)/.test(f) ? 8 : 16; }
+      var z0 = d.size, w = +(z0.width != null ? z0.width : z0[0]), h = +((z0.height != null ? z0.height : z0[1]) || 1);
+      var z = +((z0.depthOrArrayLayers != null ? z0.depthOrArrayLayers : z0[2]) || 1), t = 0;
+      for (var m = 0; m < (d.mipLevelCount || 1); m++)
+        t += Math.ceil(Math.max(1, w >> m) / blk) * Math.ceil(Math.max(1, h >> m) / blk) * b * (d.dimension === "3d" ? Math.max(1, z >> m) : z);
+      return t * (d.sampleCount || 1);
+    };
+    var upd = function () {
+      gpu.bufMiB = Math.round(gpuB / 104857.6) / 10; gpu.texMiB = Math.round(gpuT / 104857.6) / 10;
+      var tot = gpu.bufMiB + gpu.texMiB; if (tot > gpu.peakMiB) gpu.peakMiB = Math.round(tot * 10) / 10;
+    };
+    if (D && D.createBuffer && D.createTexture && G.GPUBuffer && G.GPUTexture) {
+      var texErrN = 0, cb = D.createBuffer, ct = D.createTexture, db = G.GPUBuffer.prototype.destroy, dt = G.GPUTexture.prototype.destroy;
+      D.createBuffer = function (d) { var o = cb.apply(this, arguments); try { var n = +d.size || 0; sizes.set(o, n); gpuB += n; upd(); } catch (e) {} return o; };
+      D.createTexture = function (d) { var o; try { o = ct.apply(this, arguments); } catch (err) { /* [texerr] which texture iPhones reject */ try { var z0 = d && d.size || {}; if ((texErrN = (texErrN || 0) + 1) <= 3) ev("texErr", {m: cut(err && err.message || err, 160), f: d && d.format, w: z0.width != null ? z0.width : z0[0], h: z0.height != null ? z0.height : z0[1], z: z0.depthOrArrayLayers != null ? z0.depthOrArrayLayers : z0[2], mips: d && d.mipLevelCount, usage: d && d.usage, dim: d && d.dimension, vf: d && d.viewFormats && d.viewFormats.join(",")}, true); } catch (e2) {} throw err; } try { var n = texBytes(d); sizes.set(o, n); gpuT += n; upd(); } catch (e) {} return o; };
+      G.GPUBuffer.prototype.destroy = function () { var n = sizes.get(this); if (n) { sizes.delete(this); gpuB -= n; upd(); } return db.apply(this, arguments); };
+      G.GPUTexture.prototype.destroy = function () { var n = sizes.get(this); if (n) { sizes.delete(this); gpuT -= n; upd(); } return dt.apply(this, arguments); };
+    }
+  } catch (e) {}
+  // Every 10 s: engine memory probe (parsed above from its console line) + JS heap + presented frames.
+  setInterval(function () {
+    pollMarks();
+    var M = G.cp2077EngineModule, s = {};
+    try { if (M && M._CpWebMemoryProbe) M._CpWebMemoryProbe(); } catch (e) { s.probeErr = cut(e && e.message || e, 120); }
+    var pm = performance.memory;
+    if (pm) { s.jsUsedMiB = Math.round(pm.usedJSHeapSize / 1048576); s.jsLimitMiB = Math.round(pm.jsHeapSizeLimit / 1048576); }
+    if (R.last) { s.res = R.last.estResidentMiB; s.malloc = R.last.mallocInUseMiB; s.heap = R.last.heapCapacityMiB; s.nz = R.last.nonZeroPageMiB; }
+    s.gpuBuf = gpu.bufMiB; s.gpuTex = gpu.texMiB;
+    s.frames = (M && M.cp2077PresentationStats && M.cp2077PresentationStats.validatedFrames) || 0;
+    ev("mem", s);
+  }, 10000);
+  setInterval(pollMarks, 1000);
+} catch (e) {} })();
+// [notier1] Browsers without the WebGPU feature texture-formats-tier1 (Firefox, older Chrome) have no storage access
+// for 8/16-bit and packed formats. The engine (gpu-texture-web.cpp Tier1CoreFormat) stores those textures in the
+// nearest core format; here every WGSL storage-texture declaration and bind-group-layout entry is rewritten to the
+// same format, so shaders, layouts and textures agree. textureStore/textureLoad take vec4 for every format, so only
+// the format name changes. Devices that have the feature are untouched.
+(function () { try {
+  var G = globalThis, D = G.GPUDevice && G.GPUDevice.prototype;
+  if (!D || !D.createShaderModule || !D.createBindGroupLayout) return;
+  // Channel counts are kept (gpu-texture-web.cpp Tier1CoreFormat): 1/2-channel 8/16-bit formats become r32*/rg32*.
+  var MAP = {r8unorm: "r32float", rg8unorm: "rg32float", r8snorm: "r32float", rg8snorm: "rg32float", r8uint: "r32uint",
+    rg8uint: "rg32uint", r8sint: "r32sint", rg8sint: "rg32sint", r16uint: "r32uint", r16sint: "r32sint", rg16uint: "rg32uint",
+    rg16sint: "rg32sint", r16float: "r32float", rg16float: "rg32float", rgb10a2unorm: "rgba16float", rgb10a2uint: "rgba16uint",
+    rg11b10ufloat: "rgba16float", r16unorm: "r32float", r16snorm: "r32float", rg16unorm: "rgba16float", rg16snorm: "rgba16float",
+    rgba16unorm: "rgba16float", rgba16snorm: "rgba16float"};
+  var lacks = function (dev) { try { return !!(dev && dev.features && !dev.features.has("texture-formats-tier1")); } catch (e) { return false; } };
+  var RE = /texture_storage_(1d|2d|2d_array|3d)\s*<\s*([a-z0-9]+)\s*,/g, csm = D.createShaderModule, cbgl = D.createBindGroupLayout, n = 0;
+  D.createShaderModule = function (d) {
+    try {
+      if (d && typeof d.code === "string" && d.code.indexOf("texture_storage_") >= 0 && lacks(this)) {
+        var code = d.code.replace(RE, function (m, dim, f) { return MAP[f] ? "texture_storage_" + dim + "<" + MAP[f] + "," : m; });
+        if (code !== d.code) { d = Object.assign({}, d, {code: code}); if (n++ < 3) console.log("CP2077 notier1: WGSL storage formats rewritten to core formats"); }
+      }
+    } catch (e) {}
+    return csm.call(this, d);
+  };
+  D.createBindGroupLayout = function (d) {
+    try {
+      if (d && d.entries && lacks(this)) {
+        var changed = false, entries = Array.prototype.map.call(d.entries, function (e) {
+          if (e && e.storageTexture && MAP[e.storageTexture.format]) { changed = true;
+            return Object.assign({}, e, {storageTexture: Object.assign({}, e.storageTexture, {format: MAP[e.storageTexture.format]})}); }
+          return e;
+        });
+        if (changed) d = Object.assign({}, d, {entries: entries});
+      }
+    } catch (e) {}
+    return cbgl.call(this, d);
+  };
+  // Render targets: same core formats the engine gives those textures (gpu-api-texture-web Tier1Fallback,
+  // gpu-texture-web Tier1CoreFormat), so attachment and pipeline formats agree.
+  // Channel counts are kept (a vec2 output can't target rgba16float).
+  var RT = {r16unorm: "r32float", r16snorm: "r32float", rg16unorm: "rg16float", rg16snorm: "rg16float",
+    rgba16unorm: "rgba16float", rgba16snorm: "rgba16float", rg11b10ufloat: "rgba16float",
+    r8snorm: "r16float", rg8snorm: "rg16float", rgba8snorm: "rgba16float"}, m = 0;
+  var fixTargets = function (dev, d) {
+    try {
+      var f = d && d.fragment; if (!f || !f.targets || !lacks(dev)) return d;
+      var changed = false, targets = Array.prototype.map.call(f.targets, function (t) {
+        if (t && RT[t.format] && !(t.format === "rg11b10ufloat" && dev.features.has("rg11b10ufloat-renderable"))) {
+          changed = true; return Object.assign({}, t, {format: RT[t.format]}); }
+        return t;
+      });
+      if (!changed) return d;
+      if (m++ < 3) console.log("CP2077 notier1: render target formats mapped to core formats");
+      return Object.assign({}, d, {fragment: Object.assign({}, f, {targets: targets})});
+    } catch (e) { return d; }
+  };
+  ["createRenderPipeline", "createRenderPipelineAsync"].forEach(function (name) {
+    var orig = D[name]; if (!orig) return;
+    D[name] = function (d) { return orig.call(this, fixTargets(this, d)); };
+  });
+} catch (e) {} })();
+// [pipeerr] emdawnwebgpu asserts (abort) when create*PipelineAsync rejects with anything but a GPUPipelineError
+// (e.g. a TypeError for a format the device lacks). Turn those into validation failures so the engine skips the pipeline.
+(function () { try {
+  var D = typeof GPUDevice !== "undefined" && GPUDevice.prototype; if (!D) return; var n = 0;
+  ["createRenderPipelineAsync", "createComputePipelineAsync"].forEach(function (name) {
+    var orig = D[name]; if (!orig) return;
+    D[name] = function () {
+      var p; try { p = orig.apply(this, arguments); } catch (e) { p = Promise.reject(e); }
+      return p.then(null, function (e) {
+        if (e && (e.reason === "validation" || e.reason === "internal")) throw e;
+        if (n++ < 8) console.error("CP2077 pipeerr: " + name + " rejected without reason: " + (e && (e.name + ": " + e.message)));
+        throw {reason: "validation", message: String(e && e.message || e)};
+      });
+    };
+  });
+} catch (e) {} })();
+// [devretry] 2026-10-27 probes: ~20 Chrome sessions/day never got an answer to requestDevice (boot sat at 57 % until the
+// stall reload). After 15 s (?devRetryMs=) ask once more on a fresh adapter; the first device wins, a late one is destroyed.
+(function () { try {
+  var G = globalThis, A = G.GPUAdapter && G.GPUAdapter.prototype, rd = A && A.requestDevice;
+  if (!rd || !G.navigator || !navigator.gpu) return;
+  var ms = +new URLSearchParams(location.search).get("devRetryMs") || 15000;
+  A.requestDevice = function () {
+    var args = arguments, first = rd.apply(this, args);
+    return new Promise(function (res, rej) {
+      var done = false, fails = 0, tries = 1;
+      var win = function (dev) { if (done) { try { dev && dev.destroy(); } catch (e) {} return; } done = true; res(dev); };
+      var lose = function (err) { if (done) return; if (++fails >= tries) { done = true; rej(err); } };
+      first.then(win, lose);
+      setTimeout(function () {
+        if (done) return;
+        tries++; console.log("CP2077 devretry: requestDevice unanswered after " + ms + " ms, retrying on a new adapter");
+        navigator.gpu.requestAdapter().then(function (a) { if (!a) throw new Error("no adapter on retry"); return rd.apply(a, args); }).then(win, lose);
+      }, ms);
+    });
+  };
+} catch (e) {} })();
+</script>
+  <script>/* [capcheck] public/loading/capcheck.js (after engine-select: may set CP_ENGINE_BLOCK) */
+// Browser capability check (inlined into <head> of the R2 page and the Vercel /game page by make-r2-page.mjs,
+// right after engine-select.js). Runs before the access-code panel and the engine boot.
+// Needs: 64-bit WebAssembly memory (memory64), cross-origin isolation + SharedArrayBuffer, WebGPU with an adapter.
+// If anything is missing: CP_UNSUPPORTED = reason, the engine is not booted (CP_ENGINE_BLOCK), and a
+// "can't run" panel replaces the loader UI. ?force=1 skips the check (testing).
+(function () {
+  var G = globalThis;
+  G.CP_UNSUPPORTED = null;
+  if (/[?&]force=1(&|$)/.test(location.search)) return;
+  var ua = navigator.userAgent || "";
+  var iOS = /iPhone|iPad|iPod/.test(ua) || (/Macintosh/.test(ua) && navigator.maxTouchPoints > 1);
+  var safari = /Safari\//.test(ua) && !/Chrome\/|Chromium|CriOS|FxiOS|EdgiOS|Edg\/|OPR\/|Android/.test(ua);
+  function memory64() {
+    try {   // (module (memory i64 0)): memory section, 1 memory, limits flag 0x04 (64-bit index), min 0
+      return WebAssembly.validate(new Uint8Array([0, 0x61, 0x73, 0x6d, 1, 0, 0, 0, 5, 3, 1, 4, 0]));
+    } catch (e) { return false; }
+  }
+  var missing = null;
+  if (typeof WebAssembly !== "object" || (!memory64() && !G.CP_ENGINE_W32))   // [w32] engine-select picked the wasm32 bundle
+    missing = safari || iOS ? (iOS && !safari ? "iPhone and iPad browsers use Safari's engine, which doesn't support 64-bit WebAssembly yet."
+                                              : "Safari doesn't support 64-bit WebAssembly yet.")
+                            : "This browser doesn't support 64-bit WebAssembly (memory64).";
+  else if (!G.crossOriginIsolated || typeof SharedArrayBuffer !== "function")
+    missing = "This browser or tab can't use shared memory (SharedArrayBuffer / cross-origin isolation).";
+  else if (!navigator.gpu)
+    missing = "WebGPU isn't available in this browser.";
+  function show(reason) {
+    if (G.CP_UNSUPPORTED) return;
+    G.CP_UNSUPPORTED = reason;
+    G.CP_ENGINE_BLOCK = true;
+    var render = function () {
+      var l = document.getElementById("cp-loader");
+      if (!l) return;
+      l.classList.add("unsupported");
+      var wrap = l.querySelector(".cp-wrap") || l;
+      var box = document.getElementById("cp-unsup") || wrap.appendChild(document.createElement("div"));
+      box.id = "cp-unsup"; box.className = "cp-unsup"; box.setAttribute("role", "alert");
+      box.innerHTML = "<h2>This browser can't run Cyberpunk 2077 Browser yet</h2><p class=\"cp-unsup-why\"></p>" +
+        "<p class=\"cp-unsup-fix\">Use Chrome, Edge or Brave on a desktop PC, or Chrome on Android.</p>";
+      box.querySelector(".cp-unsup-why").textContent = reason;
+      if (iOS || safari || /[?&]probe=1(&|$)/.test(location.search)) probe(box);
+    };
+    if (document.readyState === "loading") document.addEventListener("DOMContentLoaded", render); else render();
+  }
+  // [probe] Device capability report for the wasm32/iPhone port: WebGPU features + limits, the largest shared
+  // wasm memory the device grants, wasm feature support and a large-module compile test. Shown on the panel and
+  // posted (no personal data) to the Worker's /__probe; each stage is posted as it finishes, so a tab killed by a
+  // memory test still leaves the stages before it.
+  function leb(x) { var o = []; do { var b = x & 127; x = Math.floor(x / 128); o.push(x ? b | 128 : b); } while (x); return o; }
+  function probe(box) {
+    var R = {v: 1, ua: ua, t: Date.now(), screen: [screen.width, screen.height, devicePixelRatio], coi: !!G.crossOriginIsolated,
+      sab: typeof SharedArrayBuffer === "function", cores: navigator.hardwareConcurrency || 0, mem: navigator.deviceMemory || 0, stages: []};
+    var pre = document.createElement("pre"); pre.className = "cp-probe";
+    pre.style.cssText = "text-align:left;font-size:11px;white-space:pre-wrap;max-height:40vh;overflow:auto;opacity:.8";
+    box.appendChild(pre);
+    var id = (Math.random() * 1e9 | 0).toString(36);
+    function post(stage) {
+      R.stages.push(stage); pre.textContent = JSON.stringify(R, null, 1);
+      try { fetch("https://cp2077-port.fn-web-worker.workers.dev/__probe?id=" + id, {method: "POST", mode: "no-cors",
+        headers: {"Content-Type": "text/plain"}, body: JSON.stringify(R), keepalive: true}); } catch (e) {}
+    }
+    var H = [0, 0x61, 0x73, 0x6d, 1, 0, 0, 0];
+    function sec(id, bytes) { return [id].concat(leb(bytes.length), bytes); }
+    function v(bytes) { try { return WebAssembly.validate(new Uint8Array(bytes)); } catch (e) { return false; } }
+    var T = sec(1, [1, 0x60, 0, 0]), F = sec(3, [1, 0]);
+    function fn(body) { var b = [0].concat(body, [0x0b]); return sec(10, [1].concat(leb(b.length), b)); }
+    R.wasm = {
+      simd: v(H.concat(T, F, fn([0xfd, 12].concat(new Array(16).fill(0), [0x1a])))),   // v128.const 0; drop
+      threads: v(H.concat(sec(5, [1, 3, 1, 1]))),                                        // shared memory 1..1
+      memory64: memory64(),
+      exceptions: v(H.concat(T, F, fn([6, 0x40, 0x0b])))                                 // try (legacy EH) end
+    };
+    post("basic");
+    var steps = [];
+    // growable shared memory, touched page by page (real commit, like the engine heap). Runs LAST, posts every
+    // 256 MiB, and remembers progress in localStorage: if iOS kills the tab, the last posted step is the ceiling.
+    function growStep(m, mib) {
+      return function () {
+        try { var before = m.buffer.byteLength; m.grow(4096); var u = new Uint8Array(m.buffer);
+          for (var p = before; p < u.length; p += 4096) u[p] = 1; R.growMiB = mib; }
+        catch (e) { R.growErr = String(e && e.message || e).slice(0, 120); R.growStop = true; }
+        try { localStorage.setItem("cpProbeGrow", String(R.growMiB || 0)); } catch (e) {}
+        post("grow" + mib); return Promise.resolve();
+      };
+    }
+    // big module compile: mb functions of ~1 MB each (i32.const 0; drop, repeated)
+    function bigModule(mb) {
+      var reps = 349525, inner = 1 + 3 * reps + 1, size = leb(inner), per = size.length + inner;
+      var fsec = sec(3, leb(mb).concat(new Array(mb).fill(0))), cnt = leb(mb), codeLen = cnt.length + mb * per;
+      var head = H.concat(T, fsec, [10], leb(codeLen), cnt);
+      var out = new Uint8Array(head.length + mb * per), o = head.length; out.set(head);
+      for (var f = 0; f < mb; f++) { out.set(size, o); o += size.length; out[o++] = 0;
+        for (var r = 0; r < reps; r++) { out[o++] = 0x41; out[o++] = 0; out[o++] = 0x1a; } out[o++] = 0x0b; }
+      return out;
+    }
+    [32, 128, 256].forEach(function (mb) {
+      steps.push(function () {
+        var t0 = performance.now(), bytes;
+        try { bytes = bigModule(mb); } catch (e) { (R.compile = R.compile || []).push({mb: mb, err: "build " + e}); post("compile" + mb); return Promise.resolve(); }
+        return WebAssembly.compile(bytes).then(function () { (R.compile = R.compile || []).push({mb: mb, ok: true, ms: Math.round(performance.now() - t0)}); },
+          function (e) { (R.compile = R.compile || []).push({mb: mb, ok: false, err: String(e && e.message || e).slice(0, 120)}); })
+          .then(function () { bytes = null; post("compile" + mb); });
+      });
+    });
+    var gm = null; try { gm = new WebAssembly.Memory({initial: 0, maximum: 65536, shared: true}); } catch (e) { R.growErr = "create " + e; }
+    try { R.lastGrowCrash = Number(localStorage.getItem("cpProbeGrow") || 0) || null; } catch (e) {}
+    if (gm && /[?&]probe=grow(&|$)/.test(location.search)) for (var g = 256; g <= 4096 - 256; g += 256) steps.push(growStep(gm, g));
+    function run(i) { if (i < steps.length) setTimeout(function () { if (R.growStop) return post("done"); steps[i]().then(function () { run(i + 1); }); }, 80); else post("done"); }
+    // WebGPU adapter first (cheap), then the heavy steps
+    var gpu = navigator.gpu ? navigator.gpu.requestAdapter().then(function (a) {
+      if (!a) { R.gpu = {adapter: false}; return; }
+      var lim = {}; for (var k in a.limits) lim[k] = a.limits[k];
+      R.gpu = {adapter: true, features: Array.from(a.features || []).sort(), limits: lim,
+        info: a.info ? {vendor: a.info.vendor, arch: a.info.architecture, device: a.info.device, desc: a.info.description} : null};
+    }, function (e) { R.gpu = {adapter: false, err: String(e)}; }) : Promise.resolve(R.gpu = {api: false});
+    gpu.then(function () { post("gpu"); run(0); });
+  }
+  if (missing) return show(missing);
+  // WebGPU adapter (async): the engine may already be starting; the panel then replaces the loader.
+  try {
+    navigator.gpu.requestAdapter().then(function (a) {
+      if (!a) show("No compatible GPU was found. Hardware acceleration is probably off: in Chrome, Edge or Brave open Settings > System, turn on “Use graphics acceleration when available”, then relaunch the browser.");
+      // [tier1] 2026-10-23 probes: 112 desktop sessions (mostly Chrome 114-134 on the wasm32 bundle, also Android) failed
+      // CreateTexture (RG11B10Ufloat + StorageBinding needs texture-formats-tier1), never drew a frame and sat on the
+      // loader for minutes. Say so up front. iPhone/iPad are exempt (no such failures in the probes).
+      // [notier1] 2026-10-26: the 64-bit engine stores those formats as core ones (r32float etc., which need float32-filterable)
+      // and runs without the feature (Firefox, older Chrome). The wasm32 engine has no such fallback yet.
+      else if (!iOS && a.features && !a.features.has("texture-formats-tier1") && (G.CP_ENGINE_W32 || !a.features.has("float32-filterable")) &&
+               !/[?&]tier1Check=0(&|$)/.test(location.search))   // [tier1] ?tier1Check=0: test the fallback path
+        show(/Android/.test(ua) ? "This phone's browser or GPU is missing a WebGPU feature the game needs (texture-formats-tier1). Update Chrome from the Play Store; if it's already up to date, this phone's GPU isn't supported yet."
+                                : "This browser version is too old for the game (it's missing the WebGPU feature texture-formats-tier1). Update Chrome, Edge or Brave to the latest version (Settings > About), relaunch it, then reload this page.");
+    }, function () { show("WebGPU couldn't start in this browser."); });
+  } catch (e) { show("WebGPU couldn't start in this browser."); }
+})();
+</script>
+  <link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link rel="stylesheet" crossorigin="anonymous" href="https://fonts.googleapis.com/css2?family=Rajdhani:wght@500;600;700&family=JetBrains+Mono:wght@400;500&display=swap">
+  <style>
+/* Loading screen (look approved in public/loading/preview.html), scoped to #cp-loader. */
+#cp-loader{--bg:#050507;--yellow:#fcee0a;--cyan:#00f0ff;--red:#ff003c;--dim:rgba(255,255,255,.38);--line:rgba(0,240,255,.18);
+  position:fixed;inset:0;z-index:2147483000;background:var(--bg);color:#fff;overflow:hidden;
+  font-family:Rajdhani,system-ui,sans-serif;transition:opacity .6s ease}
+#cp-loader *{box-sizing:border-box;margin:0;padding:0}
+#cp-loader.out{opacity:0;pointer-events:none}
+html.cp-nodebug #cp2077-performance-overlay{display:none!important}
+#cp-loader .cp-bg{position:absolute;inset:0;background:
+  radial-gradient(900px 500px at 80% 100%,rgba(0,240,255,.08),transparent 60%),var(--bg)}
+#cp-loader .cp-grid{position:absolute;inset:-50% -50% 0 -50%;height:60%;top:auto;bottom:-10%;
+  background-image:linear-gradient(var(--line) 1px,transparent 1px),linear-gradient(90deg,var(--line) 1px,transparent 1px);
+  background-size:60px 60px;transform:perspective(500px) rotateX(62deg);transform-origin:50% 100%;
+  -webkit-mask-image:linear-gradient(to top,rgba(0,0,0,.9),transparent 80%);mask-image:linear-gradient(to top,rgba(0,0,0,.9),transparent 80%);
+  animation:cp-grid 6s linear infinite;opacity:.55}
+@keyframes cp-grid{to{background-position:0 60px,0 0}}
+#cp-loader .cp-scan{position:absolute;inset:0;pointer-events:none;
+  background:repeating-linear-gradient(to bottom,rgba(255,255,255,.025) 0 1px,transparent 1px 3px);mix-blend-mode:overlay}
+#cp-loader .cp-vign{position:absolute;inset:0;pointer-events:none;box-shadow:inset 0 0 220px 40px #000}
+#cp-loader .cp-wrap{position:relative;z-index:2;height:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;padding:24px 16px 120px}
+#cp-loader .cp-logo{width:min(720px,88vw);aspect-ratio:1583/994;background:var(--cp-logo-url,url(/runtime/loading/logo.png)) center/contain no-repeat;
+  position:relative}
+#cp-loader .cp-logo::before,#cp-loader .cp-logo::after{content:"";position:absolute;inset:0;background:inherit;opacity:0}
+#cp-loader .cp-logo.glitch::before{opacity:.7;transform:translate(-6px,0);filter:hue-rotate(160deg) saturate(3);clip-path:inset(42% 0 44% 0)}
+#cp-loader .cp-logo.glitch::after{opacity:.7;transform:translate(7px,0);filter:hue-rotate(-60deg) saturate(4);clip-path:inset(60% 0 28% 0)}
+#cp-loader .cp-hud{position:absolute;left:0;right:0;bottom:0;z-index:3;padding:0 clamp(16px,5vw,64px) clamp(20px,5vh,48px)}
+#cp-loader .cp-row{display:flex;align-items:flex-end;justify-content:space-between;gap:16px;margin-bottom:12px}
+#cp-loader .cp-stage{font-weight:600;font-size:clamp(15px,1.6vw,19px);letter-spacing:.18em;text-transform:uppercase;color:var(--yellow);
+  display:flex;align-items:center;gap:12px;min-width:0}
+#cp-loader .cp-dot{width:8px;height:8px;background:var(--yellow);box-shadow:0 0 12px var(--yellow);animation:cp-blink 1.1s steps(2) infinite;flex:none}
+@keyframes cp-blink{50%{opacity:.15}}
+#cp-loader .cp-stage span{white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+#cp-loader .cp-pct{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:clamp(26px,3.4vw,40px);font-weight:500;line-height:1;letter-spacing:-.02em}
+#cp-loader .cp-pct small{font-size:.45em;color:var(--dim);margin-left:2px}
+#cp-loader .cp-bar{position:relative;height:4px;background:rgba(255,255,255,.07);overflow:hidden;clip-path:polygon(0 0,100% 0,calc(100% - 6px) 100%,0 100%)}
+#cp-loader .cp-fill{position:absolute;inset:0 auto 0 0;width:0;background:linear-gradient(90deg,var(--cyan),var(--yellow));
+  box-shadow:0 0 18px rgba(252,238,10,.6);transition:width .35s cubic-bezier(.2,.7,.2,1)}
+#cp-loader .cp-fill::after{content:"";position:absolute;right:0;top:-6px;bottom:-6px;width:60px;background:linear-gradient(90deg,transparent,rgba(255,255,255,.85));filter:blur(4px)}
+#cp-loader .cp-ticks{display:flex;justify-content:space-between;gap:16px;margin-top:10px;font-family:"JetBrains Mono",ui-monospace,monospace;font-size:11px;color:var(--dim);letter-spacing:.06em}
+#cp-loader .cp-steps{display:flex;gap:clamp(10px,2.4vw,28px);flex-wrap:wrap}
+#cp-loader .cp-steps b{font-weight:500}
+#cp-loader .cp-steps .done{color:var(--cyan)} #cp-loader .cp-steps .now{color:#fff}
+#cp-loader .cp-meta{text-align:right;white-space:nowrap}
+#cp-loader .cp-tip{position:absolute;top:clamp(16px,4vh,36px);left:clamp(16px,5vw,64px);right:clamp(16px,5vw,64px);z-index:3;
+  display:flex;justify-content:space-between;font-family:"JetBrains Mono",ui-monospace,monospace;font-size:11px;color:var(--dim);letter-spacing:.08em}
+#cp-loader .cp-live{color:var(--cyan)}
+#cp-loader .cp-hint{margin-top:18px;font-size:clamp(14px,1.4vw,16px);letter-spacing:.06em;color:rgba(255,255,255,.6);text-align:center;max-width:620px;min-height:1.4em;transition:opacity .4s}
+#cp-loader .cp-hint em{color:var(--yellow);font-style:normal}
+#cp-loader .cp-slow{margin-top:10px;font-family:"JetBrains Mono",ui-monospace,monospace;font-size:12px;color:var(--yellow);letter-spacing:.06em}
+#cp-loader .cp-err{margin-top:22px;max-width:620px;padding:14px 18px;border:1px solid var(--red);background:rgba(255,0,60,.1);
+  color:#fff;text-align:center;clip-path:polygon(0 0,100% 0,100% calc(100% - 10px),calc(100% - 10px) 100%,0 100%)}
+#cp-loader .cp-err b{display:block;color:var(--red);letter-spacing:.18em;text-transform:uppercase;font-size:15px;margin-bottom:6px}
+#cp-loader .cp-err p{font-size:15px;line-height:1.4;word-break:break-word}
+#cp-loader .cp-err button{margin-top:10px;padding:6px 18px;background:transparent;border:1px solid var(--red);color:#fff;font:inherit;letter-spacing:.12em;cursor:pointer}
+#cp-loader [hidden]{display:none!important}
+#cp-loader.ready .cp-stage{color:var(--cyan)} #cp-loader.ready .cp-dot{background:var(--cyan);box-shadow:0 0 12px var(--cyan);animation:none}
+#cp-loader.failed .cp-stage{color:var(--red)} #cp-loader.failed .cp-dot{background:var(--red);box-shadow:0 0 12px var(--red);animation:none}
+#cp-loader.failed .cp-fill{background:var(--red)}
+@media (max-width:600px){#cp-loader .cp-steps{display:none}#cp-loader .cp-wrap{padding-bottom:140px}}
+@media (prefers-reduced-motion:reduce){#cp-loader .cp-grid,#cp-loader .cp-logo,#cp-loader .cp-dot{animation:none}}
+#cp-loader .cp-code{margin-top:22px;display:flex;flex-direction:column;align-items:center;gap:10px;width:min(420px,100%)}
+#cp-loader .cp-code label{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:12px;letter-spacing:.24em;color:var(--cyan)}
+#cp-loader .cp-code-row{display:flex;width:100%;gap:0;clip-path:polygon(0 0,100% 0,100% calc(100% - 10px),calc(100% - 10px) 100%,0 100%)}
+#cp-loader .cp-code input{flex:1;min-width:0;padding:12px 14px;background:rgba(0,240,255,.06);border:1px solid var(--line);border-right:0;color:#fff;
+  font:500 16px "JetBrains Mono",ui-monospace,monospace;letter-spacing:.12em;outline:none}
+#cp-loader .cp-code input:focus{border-color:var(--cyan);box-shadow:inset 0 0 12px rgba(0,240,255,.15)}
+#cp-loader .cp-code button{padding:0 22px;background:var(--yellow);color:#000;border:0;font:700 16px Rajdhani,system-ui,sans-serif;letter-spacing:.2em;cursor:pointer}
+#cp-loader .cp-code button:disabled{opacity:.5;cursor:default}
+#cp-loader .cp-code-msg{min-height:1.4em;font-family:"JetBrains Mono",ui-monospace,monospace;font-size:13px;letter-spacing:.08em;color:var(--dim)}
+#cp-loader .cp-code-msg.bad{color:var(--red);text-transform:uppercase;letter-spacing:.2em}
+#cp-loader.locked .cp-hud,#cp-loader.locked .cp-hint{visibility:hidden}
+/* capability check panel (capcheck.js) */
+#cp-loader.unsupported .cp-hud,#cp-loader.unsupported .cp-hint,#cp-loader.unsupported .cp-err,#cp-loader.unsupported .cp-code,#cp-loader.unsupported .cp-slow{display:none!important}
+#cp-loader .cp-unsup{margin-top:22px;max-width:640px;padding:16px 20px;border:1px solid var(--yellow);background:rgba(252,238,10,.06);text-align:center;
+  clip-path:polygon(0 0,100% 0,100% calc(100% - 12px),calc(100% - 12px) 100%,0 100%)}
+#cp-loader .cp-unsup h2{font-size:clamp(18px,2.2vw,24px);font-weight:700;letter-spacing:.08em;text-transform:uppercase;color:var(--yellow);margin:0 0 8px}
+#cp-loader .cp-unsup p{font-size:16px;line-height:1.45;color:#fff;margin:4px 0}
+#cp-loader .cp-unsup .cp-unsup-fix{color:var(--cyan)}
+/* [mobile code] the access-code panel must stay on screen on phones (portrait and landscape, with the keyboard up):
+   the wrap scrolls, centring is "safe" (never pushes content off the top), the logo shrinks to fit the height. */
+#cp-loader.locked .cp-wrap{overflow-y:auto;-webkit-overflow-scrolling:touch;justify-content:safe center;padding-bottom:24px;height:100%;height:100dvh}
+#cp-loader.locked .cp-logo{width:min(720px,88vw,calc((100dvh - 230px) * 1.593));min-width:180px;flex:none}
+@media (max-height:500px){#cp-loader.locked .cp-code{margin-top:10px}#cp-loader.locked .cp-wrap{padding-top:12px}}
+/* [launch] countdown that replaces the access-code panel until launch (xo-prelude.js countdown()) */
+#cp-loader .cp-count{margin-top:22px;display:flex;flex-direction:column;align-items:center;gap:10px;width:min(560px,100%)}
+#cp-loader .cp-count-lbl,#cp-loader .cp-count-when{font-family:"JetBrains Mono",ui-monospace,monospace;font-size:12px;letter-spacing:.24em;color:var(--cyan)}
+#cp-loader .cp-count-when{color:var(--dim)}
+#cp-loader .cp-count-dig{display:flex;gap:clamp(8px,2.4vw,18px);justify-content:center}
+#cp-loader .cp-count-dig .u{display:flex;flex-direction:column;align-items:center;min-width:clamp(62px,17vw,104px);padding:10px 6px 8px;
+  background:rgba(0,240,255,.06);border:1px solid var(--line);clip-path:polygon(0 0,100% 0,100% calc(100% - 10px),calc(100% - 10px) 100%,0 100%)}
+#cp-loader .cp-count-dig b{font:700 clamp(34px,9vw,58px)/1 Rajdhani,system-ui,sans-serif;color:var(--yellow);letter-spacing:.04em;font-variant-numeric:tabular-nums}
+#cp-loader .cp-count-dig i{font:500 10px/1 "JetBrains Mono",ui-monospace,monospace;font-style:normal;letter-spacing:.24em;color:var(--dim);margin-top:6px}
+#cp-loader.unsupported .cp-count{display:none!important}
+/* [launch-fit] user 2026-10-22: countdown + code must fit one screen, no scrolling. Logo takes what is left. */
+html:has(#cp-loader.launch),html:has(#cp-loader.launch) body{overflow:hidden;height:100%}
+#cp-loader.launch .cp-hint,#cp-loader.launch .cp-slow,#cp-loader.launch .cp-err{display:none!important}
+#cp-loader.launch .cp-wrap{overflow:hidden;justify-content:center;padding:max(10px,env(safe-area-inset-top)) 16px max(10px,env(safe-area-inset-bottom));height:100%;height:100dvh;gap:0}
+#cp-loader.launch .cp-logo{width:min(640px,88vw,calc((100dvh - 330px) * 1.593));min-width:0;flex:none}
+#cp-loader.launch .cp-count{margin-top:clamp(6px,2dvh,22px);gap:clamp(4px,1dvh,10px)}
+#cp-loader.launch .cp-count-dig .u{padding:clamp(4px,1dvh,10px) 6px clamp(4px,.9dvh,8px);min-width:clamp(56px,16vw,100px)}
+#cp-loader.launch .cp-count-dig b{font-size:clamp(26px,min(9vw,7dvh),56px)}
+#cp-loader.launch .cp-code{margin-top:clamp(8px,2.2dvh,22px);gap:clamp(4px,1dvh,10px)}
+#cp-loader.launch .cp-code input{padding:clamp(8px,1.4dvh,12px) 14px}
+#cp-loader.launch .cp-code-msg{min-height:1.2em}
+  </style>
+  <!-- [touch] public/touch/touch.{css,js} -->
+  <style id="cp-touch-css">
+/* [touch] On-screen touch controls (cloudflare/public/touch/touch.css), the look of public/touch/mockup.html: thin coral
+   lines, cut corners, dark see-through fills, line icons, tiny uppercase labels. Scoped to html.cp-touch / #cp-touch,
+   which only exist once touch.js activates, so the desktop page is unchanged. Sizes follow the game frame's height
+   (--u = one mockup pixel of a 1280x709 frame), with a floor for small phones. */
+html.cp-touch,html.cp-touch body{touch-action:none;overscroll-behavior:none;-webkit-user-select:none;user-select:none;
+  -webkit-touch-callout:none;-webkit-tap-highlight-color:transparent}
+#cp-touch{--red:#ff5a4e;--red-dim:rgba(255,90,78,.55);--cyan:#5ef6ff;--fill:rgba(18,8,10,.42);--fill-hot:rgba(255,90,78,.16);
+  --u:max(calc(min(100vh,56.25vw) / 709),0.74px);
+  position:fixed;inset:0;z-index:2147483100;pointer-events:none;font-family:Rajdhani,system-ui,sans-serif;touch-action:none}
+#cp-touch *{box-sizing:border-box;touch-action:none}
+#cp-touch.cpt-loading>:not(.cpt-rotate){display:none!important}
+#cp-touch[data-ctx=loading]>:not(.cpt-rotate){display:none!important}
+
+/* zones */
+.cpt-look,.cpt-stickzone,.cpt-menu-catch{position:absolute;display:none;pointer-events:auto}
+.cpt-look{top:0;right:0;bottom:0;width:55%}
+.cpt-stickzone{left:0;top:18%;bottom:0;width:45%}
+.cpt-menu-catch{inset:0}
+#cp-touch[data-ctx=foot] .cpt-look,#cp-touch[data-ctx=combat] .cpt-look,#cp-touch[data-ctx=dialogue] .cpt-look,
+#cp-touch[data-ctx=vehicle] .cpt-look,#cp-touch[data-ctx=passenger] .cpt-look,
+#cp-touch[data-ctx=foot] .cpt-stickzone,#cp-touch[data-ctx=combat] .cpt-stickzone,#cp-touch[data-ctx=dialogue] .cpt-stickzone,
+#cp-touch[data-ctx=vehicle] .cpt-stickzone,#cp-touch[data-ctx=menu] .cpt-menu-catch{display:block}
+
+/* shared frame + glyph */
+#cp-touch svg.f{position:absolute;inset:0;width:100%;height:100%;overflow:visible}
+#cp-touch svg.f .o{fill:var(--fill);stroke:var(--red);stroke-width:1.5;vector-effect:non-scaling-stroke;transition:fill .12s}
+#cp-touch svg.f .i{fill:none;stroke:var(--red-dim);stroke-width:1;vector-effect:non-scaling-stroke}
+#cp-touch svg.g{position:relative;fill:none;stroke:var(--red);stroke-width:1.6;stroke-linecap:square;stroke-linejoin:miter}
+#cp-touch .primary svg.f .o{fill:var(--fill-hot)}
+#cp-touch .on svg.f .o{fill:rgba(255,90,78,.38);stroke:#ff8a80}
+#cp-touch .on{filter:drop-shadow(0 0 6px rgba(255,90,78,.75))}
+#cp-touch .on svg.g{stroke:#ffd0cb}
+#cp-touch .k{display:none}
+.cpt-el .t,.cpt-sc .t,.cpt-el .lbl{font-weight:600;letter-spacing:.16em;text-transform:uppercase;color:var(--red);
+  text-shadow:0 1px 2px #000,0 0 4px #000;white-space:nowrap;line-height:1}
+
+/* context controls: fade in / out with their context */
+.cpt-el{position:absolute;display:flex;align-items:center;justify-content:center;pointer-events:auto;
+  opacity:0;visibility:hidden;transition:opacity .22s ease,visibility 0s linear .22s}
+.cpt-el.vis{opacity:1;visibility:visible;transition:opacity .22s ease}
+.cpt-b,.cpt-p{width:calc(var(--w)*var(--u));height:calc(var(--h)*var(--u));bottom:calc((var(--y) - var(--h) / 2)*var(--u))}
+.cpt-b.a-r,.cpt-p.a-r{right:calc((var(--x) - var(--w) / 2)*var(--u))}
+.cpt-b.a-c,.cpt-p.a-c{left:calc(50% + (var(--x) - var(--w) / 2)*var(--u))}
+.cpt-b svg.g{width:46%;height:46%}
+.cpt-b.primary svg.g{width:42%;height:42%}
+.cpt-b .lbl{position:absolute;top:calc(100% + 3px);left:50%;transform:translateX(-50%);font-size:max(calc(11*var(--u)),9px)}
+.cpt-p{flex-direction:column;gap:calc(6*var(--u))}
+.cpt-p svg.g{width:calc(26*var(--u));height:calc(26*var(--u))}
+.cpt-p .t{position:relative;font-size:max(calc(11*var(--u)),9px)}
+.cpt-chip{height:max(calc(var(--h)*var(--u)),28px);padding:0 calc(12*var(--u)) 0 calc(9*var(--u));gap:calc(8*var(--u));
+  bottom:calc(var(--y)*var(--u));transform:translateY(50%)}
+.cpt-chip.a-r{right:calc(var(--x)*var(--u));transform:translate(50%,50%)}
+.cpt-chip.a-c{left:calc(50% + var(--x)*var(--u));transform:translate(-50%,50%)}
+.cpt-chip svg.f .o{stroke-width:1.2}
+.cpt-chip svg.g{width:max(calc(18*var(--u)),15px);height:max(calc(18*var(--u)),15px)}
+.cpt-chip .t{position:relative;font-size:max(calc(13*var(--u)),10px);font-weight:700;letter-spacing:.14em}
+
+/* floating stick: faint ring at its home spot; jumps to where the thumb lands */
+.cpt-stick{--s:calc(128*var(--u));position:absolute;left:calc(220*var(--u));top:calc(100% - 249*var(--u));
+  width:var(--s);height:var(--s);margin:calc(var(--s) / -2) 0 0 calc(var(--s) / -2);opacity:.3;transition:opacity .2s;pointer-events:none}
+.cpt-stick svg{width:100%;height:100%;overflow:visible}
+.cpt-stick .ring{fill:rgba(18,8,10,.28);stroke:var(--red);stroke-width:1.2}
+.cpt-stick .tick line{stroke:var(--red);stroke-width:1.5}
+.cpt-stick .spr{fill:none;stroke:var(--cyan);stroke-width:1;stroke-dasharray:3 5;opacity:0;transition:opacity .15s}
+.cpt-stick .knob{fill:rgba(94,246,255,.12);stroke:var(--cyan);stroke-width:1.5}
+.cpt-stick.on{opacity:.95;transition:none}
+.cpt-stick.on .spr{opacity:.55}
+.cpt-stick.sprint .spr{opacity:1;stroke-dasharray:none;stroke-width:1.5}
+.cpt-stick.sprint .ring{stroke:var(--cyan)}
+/* steering pad (vehicle) */
+.cpt-steer{position:absolute;display:none;left:calc(215*var(--u));top:calc(100% - 209*var(--u));
+  width:calc(250*var(--u));height:max(calc(58*var(--u)),44px);transform:translate(-50%,-50%);opacity:.35;transition:opacity .2s;
+  align-items:center;justify-content:space-between;padding:0 calc(14*var(--u));pointer-events:none}
+.cpt-steer svg.f .o{fill:rgba(18,8,10,.3);stroke-width:1.2}
+.cpt-steer svg.g{width:calc(22*var(--u));height:calc(22*var(--u))}
+.cpt-steer .mid{position:absolute;left:50%;top:8px;bottom:8px;border-left:1px dashed var(--red-dim)}
+.cpt-steer .knob{position:absolute;left:50%;top:50%;width:calc(14*var(--u));height:60%;transform:translate(-50%,-50%);
+  border:1.5px solid var(--cyan);background:rgba(94,246,255,.12)}
+.cpt-steer.on{opacity:.95;transition:none}
+#cp-touch[data-ctx=vehicle] .cpt-stick{display:none}
+#cp-touch[data-ctx=vehicle] .cpt-steer{display:flex}
+
+/* strip: top-centre in play, top-left in menus */
+.cpt-strip{position:absolute;top:calc(14*var(--u));left:50%;transform:translateX(-50%);display:flex;gap:calc(6*var(--u))}
+#cp-touch[data-ctx=menu] .cpt-strip{left:calc(24*var(--u));transform:none}
+.cpt-sc{position:relative;display:none;align-items:center;gap:calc(6*var(--u));height:max(calc(30*var(--u)),28px);
+  min-width:max(calc(34*var(--u)),30px);padding:0 calc(9*var(--u));justify-content:center;pointer-events:auto}
+.cpt-sc.vis{display:flex;animation:cpt-in .22s ease}
+.cpt-sc svg.f .o{stroke-width:1.2}
+.cpt-sc svg.g{width:max(calc(16*var(--u)),14px);height:max(calc(16*var(--u)),14px)}
+.cpt-sc .t{position:relative;font-size:max(calc(12*var(--u)),10px);font-weight:700;letter-spacing:.14em}
+@keyframes cpt-in{from{opacity:0}to{opacity:1}}
+
+/* one-time first-use hint */
+.cpt-hint{position:absolute;left:50%;bottom:30%;transform:translateX(-50%);font-size:max(calc(13*var(--u)),11px);letter-spacing:.06em;
+  color:var(--cyan);background:rgba(4,12,14,.72);border-left:2px solid var(--cyan);padding:5px 10px;white-space:nowrap;
+  opacity:0;transition:opacity .4s;pointer-events:none}
+.cpt-hint.vis{opacity:1}
+#cp-touch:not([data-ctx=foot]):not([data-ctx=combat]):not([data-ctx=vehicle]) .cpt-hint{display:none}
+
+/* landscape hint */
+.cpt-rotate{display:none;position:absolute;inset:0;pointer-events:auto;background:rgba(5,5,7,.88);
+  align-items:center;justify-content:center;text-align:center;color:#fff;z-index:2}
+.cpt-rotate>div{position:relative;border:1px solid var(--red);padding:22px 26px;max-width:80vw;background:rgba(18,8,10,.6);
+  clip-path:polygon(16px 0,100% 0,100% calc(100% - 16px),calc(100% - 16px) 100%,0 100%,0 16px)}
+.cpt-rotate b{display:block;color:var(--red);font-size:20px;font-weight:700;letter-spacing:.18em;margin-bottom:8px}
+.cpt-rotate span{font-size:15px;color:rgba(255,255,255,.7);letter-spacing:.04em}
+@media (orientation:portrait){#cp-touch:not(.cpt-rotate-off) .cpt-rotate{display:flex}}
+/* the access-code panel is typed in any orientation: no "rotate your device" over it */
+html:has(#cp-loader.locked) .cpt-rotate{display:none!important}
+  </style>
+  <script id="cp-touch-js">
+// [touch] On-screen touch controls for phones/tablets (cloudflare/public/touch/touch.js, inlined into the page by
+// scripts/make-r2-page.mjs; the Vercel page inherits it). Active only on a coarse pointer (or after the first touch
+// event), or with ?touch=1 on desktop for testing; ?touch=0 disables it. Without either, nothing is built or hooked,
+// so the desktop page behaves exactly as before. Design: public/touch/mockup.html.
+//
+// Event delivery (see src/input-web.cpp): the engine reads emscripten keydown/keyup on window (keyCode), mousedown on
+// #cp2077-canvas, mouseup on window and mousemove on the canvas (movementX/Y = camera / relative cursor, clientX/Y =
+// absolute ink cursor). In gameplay it drops unlocked moves unless Module.cp2077SyntheticPointer is set during the
+// dispatch (the path cp2077-jump.js uses), so look deltas are dispatched as synthetic canvas mousemoves with that
+// flag. Phones have no pointer lock: the canvas mousedown handler's requestPointerLock is shadowed only while a
+// synthetic mousedown is being dispatched.
+//
+// Context (which controls show): the engine's own state. Module.cp2077TouchState() (engine-overlay gameInput
+// inputManager.cpp + gameInteractions interactionVisualizerController.cpp, [touch]) returns the active player / UI input
+// context (Exploration, Aiming, Vision, VehicleDrive, ...) and the number of on-screen interaction prompts (dialog =
+// choice hubs). Menus = the game shows a cursor (canvas.dataset.cp2077InkCursor / cp2077Relative, input-web.cpp).
+// "Weapon drawn" has no input context of its own: it follows Aiming and recent FIRE / AIM / RELOAD / DRAW use.
+(() => {
+  'use strict';
+  // ---- pure helpers (also unit-tested from node) ----
+  const DIAG = 0.3827;   // sin(22.5deg): 8 equal 45deg sectors
+  function dirKeys(dx, dy, radius, dead) {
+    const len = Math.hypot(dx, dy);
+    if (len < (dead == null ? 0.22 : dead) * radius || !len) return {keys: [], len: len / radius};
+    const ux = dx / len, uy = dy / len, keys = [];
+    if (uy < -DIAG) keys.push('W');
+    if (uy > DIAG) keys.push('S');
+    if (ux < -DIAG) keys.push('A');
+    if (ux > DIAG) keys.push('D');
+    return {keys, len: len / radius};
+  }
+  // s: {loading, menu, ctx, prompts, dialog, combat}
+  function pickContext(s) {
+    if (s.loading) return 'loading';
+    if (s.menu) return 'menu';
+    const c = s.ctx || '';
+    if (c === 'VehiclePassenger') return 'passenger';
+    if (/^Vehicle/.test(c)) return 'vehicle';   // VehicleDrive / TankDrive / DriverCombat / OnlyForward / NoDrive...
+    if (s.dialog > 0 && !s.combat) return 'dialogue';
+    if (s.combat || c === 'Aiming') return 'combat';
+    return 'foot';
+  }
+  if (typeof window === 'undefined') { if (typeof module !== 'undefined') module.exports = {dirKeys, pickContext}; return; }
+
+  const Q = location.search;
+  if (/[?&]touch=0(&|$)/.test(Q)) return;
+  const forced = /[?&]touch=1(&|$)/.test(Q);
+  const numQ = (name, def, lo, hi) => { const m = new RegExp('[?&]' + name + '=([\\d.]+)').exec(Q); const v = m ? Number(m[1]) : NaN; return isFinite(v) ? Math.max(lo, Math.min(hi, v)) : def; };
+  const SENS = numQ('touchSens', 1.6, 0.1, 10);
+  // Menu clicks: the engine pushes queued button events BEFORE the frame's mouse axis events, so the press must come
+  // a few frames after the move that brought the ink cursor there (jump.js waits 400 ms); then hold it a while.
+  const CLICK_DELAY = numQ('touchClickDelay', 200, 0, 2000), CLICK_HOLD = numQ('touchClickHold', 120, 20, 2000);
+  const COMBAT_MS = numQ('touchCombatSec', 20, 2, 600) * 1000;   // weapon-drawn layout lingers this long after combat input
+  const coarse = !!(window.matchMedia && matchMedia('(pointer: coarse)').matches);
+  let started = false;
+  const start = () => {
+    if (started) return; started = true;
+    if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', build, {once: true}); else build();
+  };
+
+  // ---- look: frames + line glyphs (24x24, stroke only), matching mockup.html ----
+  const cut = (w, h, c) => `M${c},0 H${w} V${h - c} L${w - c},${h} H0 V${c} Z`;   // top-left + bottom-right corners cut
+  const G = {
+    fire: '<circle cx="12" cy="12" r="6"/><path d="M12 1v5M12 18v5M1 12h5M18 12h5"/><circle cx="12" cy="12" r="1"/>',
+    aim: '<circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="3.5"/><path d="M12 3v3M12 18v3M3 12h3M18 12h3"/>',
+    reload: '<path d="M19 12a7 7 0 1 1-2.1-5"/><path d="M19 3v5h-5"/>',
+    jump: '<path d="M5 13l7-7 7 7"/><path d="M5 19l7-7 7 7"/>',
+    crouch: '<path d="M5 5l7 7 7-7"/><path d="M4 19h16"/>',
+    dodge: '<path d="M4 6l6 6-6 6"/><path d="M12 6l6 6-6 6"/>',
+    weapon: '<path d="M3 9h15l2 2v2H11l-1 6H6l1-6H3z"/><path d="M14 13v2"/>',
+    heal: '<rect x="4" y="4" width="16" height="16"/><path d="M12 8v8M8 12h8"/>',
+    scan: '<path d="M2 12s4-6 10-6 10 6 10 6-4 6-10 6S2 12 2 12z"/><circle cx="12" cy="12" r="2.5"/>',
+    map: '<path d="M3 6l6-2 6 2 6-2v14l-6 2-6-2-6 2z"/><path d="M9 4v14M15 6v14"/>',
+    menu: '<path d="M4 6h16M4 12h16M4 18h10"/>',
+    fs: '<path d="M4 9V4h5M15 4h5v5M20 15v5h-5M9 20H4v-5"/>',
+    mode: '<path d="M4 8h14l-3-3M20 16H6l3 3"/>',
+    up: '<path d="M5 15l7-7 7 7"/>', down: '<path d="M5 9l7 7 7-7"/>',
+    left: '<path d="M15 5l-7 7 7 7"/>', right: '<path d="M9 5l7 7-7 7"/>',
+    select: '<path d="M4 12l5 5L20 6"/>',
+    skip: '<path d="M5 6l6 6-6 6M13 6v12M17 6v12"/>',
+    throttle: '<path d="M12 4l7 9H5z"/><path d="M12 13v7"/>',
+    brake: '<path d="M12 20l7-9H5z"/><path d="M12 11V4"/>',
+    hand: '<rect x="4" y="4" width="16" height="16"/><path d="M9 17V7h4a3 3 0 0 1 0 6H9"/>',
+    exit: '<path d="M10 4H4v16h6"/><path d="M14 8l4 4-4 4M18 12H8"/>',
+    horn: '<path d="M3 10v4h4l6 4V6L7 10z"/><path d="M16 9a4 4 0 0 1 0 6M19 6a8 8 0 0 1 0 12"/>',
+    camera: '<rect x="3" y="7" width="18" height="12"/><circle cx="12" cy="13" r="3.5"/><path d="M8 7l2-3h4l2 3"/>',
+    radio: '<rect x="3" y="8" width="18" height="12"/><circle cx="15" cy="14" r="3"/><path d="M6 12h4M6 16h4M7 8l9-5"/>',
+    back: '<path d="M10 6l-6 6 6 6"/><path d="M4 12h16"/>',
+    interact: '<path d="M8 12V5a1.5 1.5 0 0 1 3 0v6M11 10V4a1.5 1.5 0 0 1 3 0v7M14 10a1.5 1.5 0 0 1 3 0v4c0 4-2 7-6 7s-5-2-7-6l-1-3a1.5 1.5 0 0 1 2.6-1.4L8 13"/>',
+  };
+  const glyph = n => `<svg class="g" viewBox="0 0 24 24" aria-hidden="true">${G[n] || ''}</svg>`;
+  const frame = (c, inner) => `<svg class="f" viewBox="0 0 100 100" preserveAspectRatio="none" aria-hidden="true"><path class="o" d="${cut(100, 100, c)}"/>${inner ? '<path class="i" d="M24,8 H92 V70"/>' : ''}</svg>`;
+
+  // ---- layout (mockup.html coordinates: a 1280x709 game frame; scaled by --u) ----
+  // anchor r: x/y = centre's distance from the right / bottom edge; c: x = offset from the screen centre, y from bottom.
+  // key = the PC key the control sends (documentation only; never shown). kind: b = button (w), p = pedal (w x h), chip = wide chip (h). ctx = contexts it shows in. prompt = only while
+  // the game shows an interaction prompt. hold = key / mouse button held while touched; act = special action.
+  const F = ['foot'], C = ['combat'], V = ['vehicle'], D = ['dialogue'];
+  const CONTROLS = [
+    // on foot (weapon holstered)
+    {id: 'jump-f', kind: 'b', a: 'r', x: 140, y: 169, w: 82, icon: 'jump', label: 'Jump', key: 'SPC', hold: 'SPACE', ctx: F, primary: 1},
+    {id: 'crouch-f', kind: 'b', a: 'r', x: 240, y: 109, w: 56, icon: 'crouch', label: 'Crouch', key: 'C', hold: 'C', ctx: F},
+    {id: 'draw-f', kind: 'b', a: 'r', x: 234, y: 221, w: 56, icon: 'weapon', label: 'Draw', key: '1', hold: 'ONE', ctx: F, combat: 1},
+    {id: 'dodge-f', kind: 'b', a: 'r', x: 328, y: 143, w: 48, icon: 'dodge', label: 'Dodge', act: 'dodge', ctx: F},
+    {id: 'use', kind: 'chip', a: 'r', x: 480, y: 314, h: 40, icon: 'interact', label: 'Interact', key: 'F', hold: 'F', ctx: ['foot', 'combat'], prompt: 1},
+    // weapon drawn
+    {id: 'fire', kind: 'b', a: 'r', x: 142, y: 179, w: 94, icon: 'fire', label: 'Fire', hold: 'LMB', look: 1, ctx: C, primary: 1, combat: 1},
+    {id: 'aim', kind: 'b', a: 'r', x: 254, y: 247, w: 62, icon: 'aim', label: 'Aim', hold: 'RMB', look: 1, ctx: C, combat: 1},
+    {id: 'reload', kind: 'b', a: 'r', x: 130, y: 305, w: 52, icon: 'reload', label: 'Reload', key: 'R', hold: 'R', ctx: C, combat: 1},
+    {id: 'jump-c', kind: 'b', a: 'r', x: 252, y: 117, w: 52, icon: 'jump', label: 'Jump', key: 'SPC', hold: 'SPACE', ctx: C},
+    {id: 'crouch-c', kind: 'b', a: 'r', x: 342, y: 91, w: 46, icon: 'crouch', label: 'Crouch', key: 'C', hold: 'C', ctx: C},
+    {id: 'heal', kind: 'b', a: 'r', x: 350, y: 189, w: 46, icon: 'heal', label: 'Heal', key: 'X', hold: 'X', ctx: C},
+    {id: 'weapon', kind: 'b', a: 'r', x: 46, y: 253, w: 44, icon: 'weapon', label: 'Weapon', key: '1', hold: 'ONE', ctx: C, combat: 1},
+    {id: 'dodge-c', kind: 'b', a: 'r', x: 355, y: 279, w: 44, icon: 'dodge', label: 'Dodge', act: 'dodge', ctx: C},
+    // driving: pedals stay left of the game's own key-hint panel on the right edge (Switch Camera / Exit / Radio,
+    // about x 1120-1250, y 535-620 of the 1280x709 frame)
+    {id: 'gas', kind: 'p', a: 'r', x: 215, y: 239, w: 74, h: 170, icon: 'throttle', label: 'Gas', hold: 'W', ctx: V, primary: 1},
+    {id: 'brake', kind: 'p', a: 'r', x: 305, y: 214, w: 74, h: 120, icon: 'brake', label: 'Brake', hold: 'S', ctx: V},
+    {id: 'handbrake', kind: 'b', a: 'r', x: 395, y: 179, w: 54, icon: 'hand', label: 'Handbrake', key: 'SPC', hold: 'SPACE', ctx: V},
+    {id: 'horn', kind: 'b', a: 'r', x: 390, y: 269, w: 44, icon: 'horn', label: 'Horn', key: 'E', hold: 'E', ctx: V},
+    {id: 'exit', kind: 'chip', a: 'r', x: 140, y: 337, h: 34, icon: 'exit', label: 'Exit', key: 'F', hold: 'F', ctx: ['vehicle', 'passenger']},
+    // dialogue choices (next to the game's choice list, right of the screen centre)
+    {id: 'ch-up', kind: 'b', a: 'c', x: 232, y: 231, w: 50, icon: 'up', key: '↑', hold: 'UP', ctx: D},
+    {id: 'ch-down', kind: 'b', a: 'c', x: 232, y: 129, w: 50, icon: 'down', key: '↓', hold: 'DOWN', ctx: D},
+    {id: 'ch-select', kind: 'b', a: 'c', x: 335, y: 180, w: 80, icon: 'select', label: 'Select', key: 'F', hold: 'F', ctx: D, primary: 1},
+    {id: 'ch-skip', kind: 'chip', a: 'c', x: 470, y: 91, h: 30, icon: 'skip', label: 'Skip', key: 'SPC', hold: 'SPACE', ctx: D},
+  ];
+  // top strip (top-centre in play, top-left in menus)
+  const STRIP = [
+    {id: 's-back', icon: 'back', label: 'Back', key: 'ESC', hold: 'ESC', ctx: ['menu']},
+    {id: 's-scan', icon: 'scan', label: 'Scan', key: 'TAB', hold: 'TAB', ctx: ['foot', 'combat']},
+    {id: 's-cam', icon: 'camera', label: 'Cam', key: 'Q', hold: 'Q', ctx: ['vehicle', 'passenger']},
+    {id: 's-radio', icon: 'radio', label: 'Radio', key: 'R', hold: 'R', ctx: ['vehicle', 'passenger']},
+    {id: 's-map', icon: 'map', label: 'Map', key: 'M', hold: 'M', ctx: ['foot', 'combat', 'vehicle', 'passenger']},
+    {id: 's-menu', icon: 'menu', label: 'Menu', key: 'ESC', hold: 'ESC', ctx: ['foot', 'combat', 'vehicle', 'passenger', 'dialogue']},
+    {id: 's-mode', icon: 'mode', act: 'mode', ctx: ['foot', 'combat', 'vehicle', 'passenger', 'dialogue', 'menu'], title: 'Switch game / menu controls'},
+    {id: 's-fs', icon: 'fs', act: 'fs', ctx: ['foot', 'combat', 'vehicle', 'passenger', 'dialogue', 'menu'], title: 'Fullscreen'},
+  ];
+  const STICK_CTX = ['foot', 'combat', 'dialogue', 'vehicle'], LOOK_CTX = ['foot', 'combat', 'dialogue', 'vehicle', 'passenger'];
+
+  function build() {
+    const de = document.documentElement;
+    de.classList.add('cp-touch');
+    const canvas = () => document.getElementById('cp2077-canvas');
+    const mod = () => globalThis.cp2077EngineModule;
+
+    // ---- page: no scroll / zoom while playing ----
+    const vp = document.querySelector('meta[name=viewport]');
+    if (vp) vp.setAttribute('content', 'width=device-width,initial-scale=1,maximum-scale=1,user-scalable=no,viewport-fit=cover');
+    const stop = e => { if (e.cancelable) e.preventDefault(); };
+    for (const t of ['gesturestart', 'gesturechange', 'gestureend']) document.addEventListener(t, stop, {passive: false});
+    document.addEventListener('touchmove', e => { if (e.touches.length > 1 || !e.target.closest || !e.target.closest('input,textarea,select')) stop(e); }, {passive: false});
+    document.addEventListener('dblclick', stop, {passive: false});
+    // A real finger reaching the bare canvas must not become a compat mousedown (= Left Mouse shot, and the canvas
+    // handler's requestPointerLock, which iOS lacks). Real mouse input on desktop is unaffected.
+    let guarded = null;
+    const guardCanvas = () => { const c = canvas(); if (c && c !== guarded) { guarded = c; c.addEventListener('touchstart', stop, {passive: false}); } };
+    guardCanvas();
+
+    // ---- synthetic input ----
+    let curX = null, curY = null, lastMoveT = 0;   // last synthetic client position (menus) and when it was sent
+    const settle = () => Math.max(0, CLICK_DELAY - (performance.now() - lastMoveT));
+    const centre = () => { const r = canvas().getBoundingClientRect(); return [r.left + r.width / 2, r.top + r.height / 2]; };
+    function mouse(type, cx, cy, mx, my, button, buttons) {
+      const c = canvas(), m = mod();
+      if (!c || !m) return;
+      const ev = new MouseEvent(type, {bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy, screenX: cx, screenY: cy,
+        movementX: mx, movementY: my, button, buttons});
+      // Safari may ignore movementX in the init dict; emscripten reads e.movementX.
+      Object.defineProperty(ev, 'movementX', {get: () => mx});
+      Object.defineProperty(ev, 'movementY', {get: () => my});
+      const shadow = type === 'mousedown';
+      if (shadow) c.requestPointerLock = () => Promise.resolve();   // no pointer lock on touch (and none from a synthetic click)
+      m.cp2077SyntheticPointer = true;
+      try { c.dispatchEvent(ev); } finally {
+        m.cp2077SyntheticPointer = false;
+        if (shadow) delete c.requestPointerLock;
+      }
+      if (shadow) try { c.focus({preventScroll: true}); } catch (_) {}
+    }
+    let remX = 0, remY = 0;
+    function look(dx, dy) {
+      const fx = dx * SENS + remX, fy = dy * SENS + remY;
+      const mx = Math.round(fx), my = Math.round(fy);
+      remX = fx - mx; remY = fy - my;
+      if (!mx && !my) return;
+      const [cx, cy] = centre();
+      mouse('mousemove', cx, cy, mx, my, 0, held.has('LMB') ? 1 : 0);
+    }
+    function moveTo(cx, cy, buttons) {
+      const mx = curX == null ? 0 : Math.round(cx - curX), my = curY == null ? 0 : Math.round(cy - curY);
+      curX = cx; curY = cy; lastMoveT = performance.now();
+      mouse('mousemove', cx, cy, mx, my, 0, buttons);
+    }
+    function mouseButton(down, button) {
+      let [cx, cy] = curX == null ? centre() : [curX, curY];
+      if (ctx !== 'menu') [cx, cy] = centre();
+      mouse(down ? 'mousedown' : 'mouseup', cx, cy, 0, 0, button, down ? (button === 2 ? 2 : 1) : 0);
+    }
+    const KEY = {
+      W: [87, 'w', 'KeyW'], A: [65, 'a', 'KeyA'], S: [83, 's', 'KeyS'], D: [68, 'd', 'KeyD'],
+      SHIFT: [16, 'Shift', 'ShiftRight', 2],   // Sprint_Button = IK_RShift (hold); IK_LShift is the sprint toggle
+      SPACE: [32, ' ', 'Space'], C: [67, 'c', 'KeyC'], R: [82, 'r', 'KeyR'], F: [70, 'f', 'KeyF'], X: [88, 'x', 'KeyX'],
+      E: [69, 'e', 'KeyE'], Q: [81, 'q', 'KeyQ'],
+      ONE: [49, '1', 'Digit1'], TAB: [9, 'Tab', 'Tab'], M: [77, 'm', 'KeyM'], ESC: [27, 'Escape', 'Escape'], ENTER: [13, 'Enter', 'Enter'],
+      UP: [38, 'ArrowUp', 'ArrowUp'], DOWN: [40, 'ArrowDown', 'ArrowDown'],   // IK_Up/IK_Down: UI_DialogFocus / UI_MoveUp/Down (choices)
+    };
+    function fireKey(type, name) {
+      const [code, key, phys, location] = KEY[name];
+      const ev = new KeyboardEvent(type, {key, code: phys, location: location || 0, bubbles: true, cancelable: true, view: window});
+      for (const p of ['keyCode', 'which']) Object.defineProperty(ev, p, {get: () => code});
+      window.dispatchEvent(ev);
+    }
+    // Reference-counted holds (stick + buttons may share a key). LMB/RMB are mouse buttons.
+    const held = new Map();
+    function press(name) {
+      const n = (held.get(name) || 0) + 1; held.set(name, n);
+      if (n !== 1) return;
+      if (name === 'LMB' || name === 'RMB') mouseButton(true, name === 'LMB' ? 0 : 2); else fireKey('keydown', name);
+    }
+    function release(name) {
+      const n = (held.get(name) || 0) - 1;
+      if (n > 0) { held.set(name, n); return; }
+      if (!held.has(name)) return;
+      held.delete(name);
+      if (name === 'LMB' || name === 'RMB') mouseButton(false, name === 'LMB' ? 0 : 2); else fireKey('keyup', name);
+    }
+    function releaseAll() {
+      for (const b of buttons) b.cancel();
+      for (const name of [...held.keys()]) { held.set(name, 1); release(name); }
+      stickEnd(); lookId = null; endMenuTouch();
+    }
+
+    // ---- DOM ----
+    const root = document.createElement('div');
+    root.id = 'cp-touch';
+    const keyChip = () => '';   // mobile only: icons + short words, no PC key chips
+    const ctrlHtml = c => {
+      const pos = `--x:${c.x};--y:${c.y};--w:${c.w || 0};--h:${c.h || c.w || 0}`;
+      const cls = `cpt-el cpt-${c.kind} a-${c.a}${c.primary ? ' primary' : ''}`;
+      const data = `data-id="${c.id}"`;
+      if (c.kind === 'chip') return `<div class="${cls}" ${data} style="${pos}">${frame(22)}${keyChip(c.key)}${glyph(c.icon)}<span class="t">${c.label || ''}</span></div>`;
+      if (c.kind === 'p') return `<div class="${cls}" ${data} style="${pos}">${frame(14, c.primary)}${glyph(c.icon)}<span class="t">${c.label || ''}</span></div>`;
+      return `<div class="${cls}" ${data} style="${pos}">${frame(18, c.primary)}${glyph(c.icon)}${keyChip(c.key)}${c.label ? `<span class="lbl">${c.label}</span>` : ''}</div>`;
+    };
+    const stripHtml = c => `<div class="cpt-sc" data-id="${c.id}"${c.title ? ` title="${c.title}"` : ''}>${frame(22)}${keyChip(c.key)}${glyph(c.icon)}${c.label ? `<span class="t">${c.label}</span>` : ''}</div>`;
+    const ticks = [0, 45, 90, 135, 180, 225, 270, 315].map(a => `<line x1="0" y1="-44" x2="0" y2="${a % 90 ? -40 : -37}" transform="rotate(${a})"/>`).join('');
+    root.innerHTML = `
+      <div class="cpt-look" data-zone="look"></div>
+      <div class="cpt-stickzone" data-zone="stick">
+        <div class="cpt-stick"><svg viewBox="-60 -60 120 120" aria-hidden="true"><circle class="spr" r="56"/><circle class="ring" r="44"/><g class="tick">${ticks}</g><circle class="knob" r="14"/></svg></div>
+        <div class="cpt-steer">${frame(20)}${glyph('left')}<div class="mid"></div><div class="knob"></div>${glyph('right')}</div>
+      </div>
+      <div class="cpt-menu-catch" data-zone="menu"></div>
+      ${CONTROLS.map(ctrlHtml).join('')}
+      <div class="cpt-strip">${STRIP.map(stripHtml).join('')}</div>
+      <div class="cpt-hint"></div>
+      <div class="cpt-rotate" data-id="rotate"><div><b>ROTATE YOUR DEVICE</b><span>Cyberpunk 2077 plays in landscape. Tap to dismiss.</span></div></div>`;
+    document.body.appendChild(root);
+    const $ = s => root.querySelector(s);
+    root.addEventListener('contextmenu', stop);
+    const specs = new Map([...CONTROLS, ...STRIP, {id: 'rotate', act: 'rotate'}].map(c => [c.id, c]));
+
+    // ---- context: loading / menu / foot / combat / vehicle / passenger / dialogue ----
+    let ctx = null, override = null, lastSig = null, lastCombat = -1e9, eng = null, engAt = 0;
+    let startTap = false, startTapUsed = false;   // [starttap] see the menu tap handler
+    const prompts = () => eng ? eng.prompts > 0 : true;   // engines without the hook: keep INTERACT available
+    function readEngine() {
+      const m = mod(), f = m && m.cp2077TouchState;
+      if (m) {   // tell the engine touch mode is on: it hides its keyboard hint lists (gameUI inputHintManagerController.cpp)
+        m.cp2077TouchActive = true;
+        if (typeof m.cp2077SetTouchActive === 'function') m.cp2077SetTouchActive(1);
+      }
+      if (typeof f !== 'function') return;
+      let s = null;
+      try { s = f(); } catch (_) {}
+      if (!s) return;   // mid-write; next poll
+      eng = s; engAt = performance.now();
+      const c = canvas();
+      if (c) { c.dataset.cp2077InputCtx = s.ctx; c.dataset.cp2077InputUi = s.ui; c.dataset.cp2077Prompts = s.prompts + '/' + s.dialog; }
+    }
+    function update() {
+      readEngine();
+      const c = canvas();
+      const loading = de.classList.contains('cp-loading') || !!document.getElementById('cp-loader');
+      // Menu = the game shows a cursor: its own ink cursor (Menu/notification/photo-mode layer) or the OS cursor. The
+      // MODE button overrides the detection until the engine's cursor state next changes.
+      const sig = c ? (c.dataset.cp2077InkCursor || '-') + '/' + (c.dataset.cp2077Relative || '-') : '';
+      if (sig !== lastSig) { lastSig = sig; override = null; }
+      const autoMenu = !c || c.dataset.cp2077InkCursor === '1' || c.dataset.cp2077Relative !== '1';
+      const menu = override == null ? autoMenu : override;
+      if (eng && eng.ctx === 'Aiming') lastCombat = performance.now();
+      const next = pickContext({loading, menu, ctx: eng && eng.ctx, prompts: eng ? eng.prompts : 0, dialog: eng ? eng.dialog : 0,
+        combat: performance.now() - lastCombat < COMBAT_MS});
+      setContext(next, prompts());
+      api.engine = eng;
+    }
+    let promptOn = null;
+    const shown = sp => !sp.ctx || (sp.ctx.includes(ctx) && (!sp.prompt || promptOn));
+    function setContext(next, prompt) {
+      if (next === ctx && prompt === promptOn) return;
+      const prev = ctx;
+      ctx = next; promptOn = prompt;
+      root.dataset.ctx = next;
+      for (const el of root.querySelectorAll('.cpt-el,.cpt-sc')) el.classList.toggle('vis', shown(specs.get(el.dataset.id)));
+      for (const b of buttons) if (!b.visible()) b.cancel();   // release what just disappeared
+      if (next === prev) return;
+      if (!STICK_CTX.includes(next) || (prev === 'vehicle') !== (next === 'vehicle')) stickEnd();
+      if (!LOOK_CTX.includes(next)) lookId = null;
+      if (next !== 'menu') endMenuTouch();
+      if (next === 'menu' && !startTapUsed) startTap = true;   // [starttap] first menu after page load (title screen)
+      curX = curY = null;
+      api.mode = next === 'loading' ? 'loading' : next === 'menu' ? 'menu' : 'game';
+      api.ctx = next;
+      if (['foot', 'combat', 'vehicle'].includes(next)) showHintOnce();
+    }
+    const api = globalThis.cp2077Touch = {active: true, mode: null, ctx: null, sens: SENS, engine: null, releaseAll,
+      setMode: v => { override = v === 'menu' ? true : v === 'game' ? false : null; update(); },
+      combat: on => { lastCombat = on ? performance.now() : -1e9; update(); }};
+
+    // ---- first-use hint (once per browser) ----
+    function showHintOnce() {
+      try { if (localStorage.getItem('cp2077TouchHint3')) return; localStorage.setItem('cp2077TouchHint3', '1'); } catch (_) { return; }
+      const h = $('.cpt-hint');
+      h.textContent = 'Left side: move (push past the ring to sprint) · right side: look';
+      h.classList.add('vis');
+      setTimeout(() => h.classList.remove('vis'), 6000);
+    }
+
+    // ---- stick (left; floats to where the thumb lands) / steering in a vehicle ----
+    const zone = $('.cpt-stickzone'), stick = $('.cpt-stick'), knob = $('.cpt-stick .knob'), steer = $('.cpt-steer'), steerKnob = $('.cpt-steer .knob');
+    let stickId = null, sx = 0, sy = 0, stickKeys = [], stickSprint = false, latch = false, lastStickEnd = 0;
+    const steering = () => ctx === 'vehicle';
+    const visual = () => steering() ? steer : stick;
+    function setStickKeys(keys, sprint) {
+      for (const k of stickKeys) if (!keys.includes(k)) release(k);
+      for (const k of keys) if (!stickKeys.includes(k)) press(k);
+      stickKeys = keys;
+      if (sprint !== stickSprint) { stickSprint = sprint; sprint ? press('SHIFT') : release('SHIFT'); }
+    }
+    function stickEnd() {
+      if (stickId == null) return;
+      stickId = null; lastStickEnd = performance.now();
+      setStickKeys([], false); latch = false;
+      for (const v of [stick, steer]) { v.classList.remove('on', 'sprint'); v.style.left = v.style.top = ''; }
+      knob.setAttribute('cx', 0); knob.setAttribute('cy', 0); steerKnob.style.left = '';
+    }
+    zone.addEventListener('pointerdown', e => {
+      stop(e); if (stickId != null) return;
+      stickId = e.pointerId; try { zone.setPointerCapture(e.pointerId); } catch (_) {}
+      const r = zone.getBoundingClientRect(), v = visual();
+      sx = e.clientX; sy = e.clientY;
+      v.style.left = (e.clientX - r.left) + 'px'; v.style.top = (e.clientY - r.top) + 'px';
+      v.classList.add('on');
+      latch = !steering() && performance.now() - lastStickEnd < 300;   // double-tap = sprint for this hold
+      setStickKeys([], false);
+    });
+    zone.addEventListener('pointermove', e => {
+      if (e.pointerId !== stickId) return; stop(e);
+      const dx = e.clientX - sx, dy = e.clientY - sy;
+      if (steering()) {
+        const half = steer.offsetWidth / 2 - 14 || 100;
+        const k = Math.max(-1, Math.min(1, dx / half));
+        steerKnob.style.left = (50 + k * 42) + '%';
+        setStickKeys(k < -0.2 ? ['A'] : k > 0.2 ? ['D'] : [], false);
+        return;
+      }
+      const R = stick.offsetWidth * 44 / 120 || 47;   // ring radius in px
+      const {keys, len} = dirKeys(dx, dy, R);
+      const k = Math.min(1, R / (Math.hypot(dx, dy) || 1)) * 120 / (stick.offsetWidth || 128);
+      knob.setAttribute('cx', (dx * k).toFixed(1)); knob.setAttribute('cy', (dy * k).toFixed(1));
+      const sprint = keys.length > 0 && (latch || len > 1.25);   // push past the outer ring = sprint
+      stick.classList.toggle('sprint', sprint);
+      setStickKeys(keys, sprint);
+    });
+    for (const t of ['pointerup', 'pointercancel', 'lostpointercapture']) zone.addEventListener(t, e => { if (e.pointerId === stickId) stickEnd(); });
+
+    // ---- look (right side; FIRE / AIM also look while held) ----
+    const lookEl = $('.cpt-look');
+    let lookId = null;
+    const lastPos = new Map();
+    function lookMove(e) {
+      const p = lastPos.get(e.pointerId); if (!p) return;
+      const evs = e.getCoalescedEvents ? e.getCoalescedEvents() : [];   // full finger path at the display rate
+      const last = evs.length ? evs[evs.length - 1] : e;
+      look(last.clientX - p[0], last.clientY - p[1]);
+      lastPos.set(e.pointerId, [last.clientX, last.clientY]);
+    }
+    lookEl.addEventListener('pointerdown', e => {
+      stop(e); if (lookId != null) return;
+      lookId = e.pointerId; lastPos.set(e.pointerId, [e.clientX, e.clientY]);
+      try { lookEl.setPointerCapture(e.pointerId); } catch (_) {}
+    });
+    lookEl.addEventListener('pointermove', e => { if (e.pointerId === lookId) { stop(e); lookMove(e); } });
+    for (const t of ['pointerup', 'pointercancel', 'lostpointercapture']) lookEl.addEventListener(t, e => { if (e.pointerId === lookId) { lookId = null; lastPos.delete(e.pointerId); } });
+
+    // ---- buttons ----
+    async function dodge() {
+      // Keyboard dodge = double-tap a direction (DodgeForward/Right/Back/Left_Button); default back.
+      const k = stickKeys.find(x => x !== 'SHIFT') || 'S';
+      const wait = ms => new Promise(r => setTimeout(r, ms));
+      const wasHeld = held.has(k);
+      // ~100 ms steps: the engine samples once per frame, shorter steps can collapse into one frame at phone frame rates
+      if (wasHeld) { fireKey('keyup', k); await wait(100); }
+      fireKey('keydown', k); await wait(100); fireKey('keyup', k); await wait(100); fireKey('keydown', k); await wait(120);
+      if (!held.has(k)) fireKey('keyup', k);
+    }
+    function fullscreen() {
+      const fe = document.fullscreenElement || document.webkitFullscreenElement;
+      if (fe) { (document.exitFullscreen || document.webkitExitFullscreen).call(document); return; }
+      const el = de, req = el.requestFullscreen || el.webkitRequestFullscreen;
+      if (!req) return;
+      const p = req.call(el, {navigationUI: 'hide'});
+      const lock = () => { try { const q = screen.orientation && screen.orientation.lock && screen.orientation.lock('landscape'); if (q && q.catch) q.catch(() => {}); } catch (_) {} };
+      if (p && p.then) p.then(lock, () => {}); else lock();
+    }
+    if (!(de.requestFullscreen || de.webkitRequestFullscreen)) $('[data-id="s-fs"]').remove();
+    const buttons = [];
+    root.querySelectorAll('.cpt-el,.cpt-sc,.cpt-rotate').forEach(el => {
+      const sp = specs.get(el.dataset.id);
+      if (!sp) return;
+      let id = null;
+      const end = () => {
+        if (id == null) return;
+        lastPos.delete(id); id = null; el.classList.remove('on');
+        if (sp.hold) release(sp.hold);
+      };
+      buttons.push({cancel: end, visible: () => shown(sp)});
+      el.addEventListener('pointerdown', e => {
+        stop(e); if (id != null) return;
+        id = e.pointerId; try { el.setPointerCapture(e.pointerId); } catch (_) {}
+        el.classList.add('on');
+        if (sp.look) lastPos.set(e.pointerId, [e.clientX, e.clientY]);
+        if (sp.combat) lastCombat = performance.now();
+        if (sp.hold) press(sp.hold);
+        if (sp.act === 'dodge') dodge();
+        else if (sp.act === 'fs') fullscreen();
+        else if (sp.act === 'mode') { override = ctx !== 'menu'; update(); }
+        else if (sp.act === 'rotate') root.classList.add('cpt-rotate-off');
+        if (sp.combat && ctx === 'foot') setTimeout(update, 0);   // DRAW / FIRE switch to the weapon layout
+      });
+      el.addEventListener('pointermove', e => { if (e.pointerId === id && sp.look) { stop(e); lookMove(e); } });
+      for (const t of ['pointerup', 'pointercancel', 'lostpointercapture']) el.addEventListener(t, e => { if (e.pointerId === id) end(); });
+    });
+
+    // ---- menus: taps = left clicks at that position, drags = moves with the button held, 2 fingers = wheel ----
+    const catcher = $('.cpt-menu-catch');
+    const menuPts = new Map();
+    let menuId = null, menuDown = false, menuDownTimer = 0, wheelAcc = 0, wheelY = null;
+    // [starttap] 2026-10-24: the title screen after loading ("PRESS [Space] TO CONTINUE") takes only the Space key, so
+    // phones were stuck there. The first tap in the first menu after the loader sends Space instead of a click.
+    // (startTap / startTapUsed are declared with ctx above: setContext uses them)
+    function endMenuTouch() {
+      clearTimeout(menuDownTimer);
+      if (menuId != null && menuDown) mouse('mouseup', curX, curY, 0, 0, 0, 0);
+      menuId = null; menuDown = false; menuPts.clear(); wheelY = null;
+    }
+    catcher.addEventListener('pointerdown', e => {
+      stop(e);
+      menuPts.set(e.pointerId, [e.clientX, e.clientY]);
+      try { catcher.setPointerCapture(e.pointerId); } catch (_) {}
+      if (menuPts.size === 2) {   // second finger: switch to scrolling, drop the pending click
+        clearTimeout(menuDownTimer);
+        if (menuDown) mouse('mouseup', curX, curY, 0, 0, 0, 0);
+        menuDown = false; menuId = null;
+        wheelY = [...menuPts.values()].reduce((s, p) => s + p[1], 0) / 2; wheelAcc = 0;
+        return;
+      }
+      if (menuPts.size > 2 || menuId != null) return;
+      menuId = e.pointerId;
+      moveTo(e.clientX, e.clientY, 0);
+      // let the cursor reach the tap point for a few frames before pressing (see CLICK_DELAY)
+      menuDownTimer = setTimeout(() => { if (menuId === e.pointerId && !menuDown) { menuDown = true; mouse('mousedown', curX, curY, 0, 0, 0, 1); } }, CLICK_DELAY);
+    });
+    catcher.addEventListener('pointermove', e => {
+      if (!menuPts.has(e.pointerId)) return; stop(e);
+      menuPts.set(e.pointerId, [e.clientX, e.clientY]);
+      if (wheelY != null && menuPts.size >= 2) {
+        const y = [...menuPts.values()].reduce((s, p) => s + p[1], 0) / menuPts.size;
+        wheelAcc += y - wheelY; wheelY = y;
+        const c = canvas();
+        while (c && Math.abs(wheelAcc) >= 40) {
+          const step = wheelAcc > 0 ? 1 : -1; wheelAcc -= step * 40;
+          const [cx, cy] = curX == null ? [e.clientX, e.clientY] : [curX, curY];
+          // finger down = content follows the finger = wheel up (deltaY < 0)
+          c.dispatchEvent(new WheelEvent('wheel', {bubbles: true, cancelable: true, view: window, clientX: cx, clientY: cy, deltaY: -step * 100, deltaMode: 0}));
+        }
+        return;
+      }
+      if (e.pointerId === menuId) moveTo(e.clientX, e.clientY, menuDown ? 1 : 0);
+    });
+    const menuUp = e => {
+      if (!menuPts.has(e.pointerId)) return;
+      menuPts.delete(e.pointerId);
+      if (menuPts.size === 0) wheelY = null;
+      if (e.pointerId !== menuId) return;
+      menuId = null;
+      clearTimeout(menuDownTimer);
+      const x = curX, y = curY;
+      if (menuDown) {   // drag end: let the last move land first
+        menuDown = false;
+        setTimeout(() => mouse('mouseup', x, y, 0, 0, 0, 0), Math.min(settle(), 60));
+      } else if (e.type === 'pointerup' && startTap) {
+        startTap = false; startTapUsed = true;
+        fireKey('keydown', 'SPACE'); setTimeout(() => fireKey('keyup', 'SPACE'), CLICK_HOLD);
+      } else if (e.type === 'pointerup') {   // quick tap: press once the cursor has settled, then hold CLICK_HOLD
+        setTimeout(() => { mouse('mousedown', x, y, 0, 0, 0, 1); setTimeout(() => mouse('mouseup', x, y, 0, 0, 0, 0), CLICK_HOLD); }, settle());
+      }
+    };
+    for (const t of ['pointerup', 'pointercancel', 'lostpointercapture']) catcher.addEventListener(t, menuUp);
+
+    // ---- watch the engine / page state ----
+    const mo = new MutationObserver(update);
+    mo.observe(de, {attributes: true, attributeFilter: ['class']});
+    mo.observe(document.body, {childList: true});
+    const watchCanvas = () => { const c = canvas(); if (c && !c.cp2077TouchWatched) { c.cp2077TouchWatched = 1; mo.observe(c, {attributes: true, attributeFilter: ['data-cp2077-ink-cursor', 'data-cp2077-relative']}); } };
+    watchCanvas(); update();
+    setInterval(() => { watchCanvas(); guardCanvas(); update(); }, 200);   // engine context poll (cheap: one small struct read)
+
+    window.addEventListener('blur', releaseAll);
+    document.addEventListener('visibilitychange', () => { if (document.hidden) releaseAll(); });
+    console.log('CP2077 touch controls active (' + (forced ? '?touch=1' : coarse ? 'pointer: coarse' : 'first touch') + ', sens ' + SENS + ')');
+  }
+
+  // start last: build() uses the layout constants above
+  if (forced || coarse) start();
+  else window.addEventListener('touchstart', start, {once: true, passive: true, capture: true});
+})();
+</script>
+  <!-- [support] public/support/support.{css,js} -->
+  <style id="cp-support-css">
+/* [support] "Support the project" panel in the game's MAIN MENU, right side, vertically centred. Drawn to match the
+   original main-menu widgets (the "My Rewards" frame and the NEW GAME / LOAD GAME list): thin red frame on a dark
+   translucent plate, red Rajdhani caps, cyan highlight with underline bar and square marker on hover/focus.
+   Sizes are in vh so it scales with the canvas like the game's own UI. */
+#cp-support{--r:#c8483a;--r2:rgba(200,72,58,.55);--c:#20f0f0;--c2:rgba(32,240,240,.5);
+  position:fixed;right:4.85vw;top:50%;transform:translateY(-50%);z-index:2147483000;display:none;width:min(46vh,40vw);
+  font-family:Rajdhani,system-ui,sans-serif;user-select:none;-webkit-user-select:none;opacity:0;transition:opacity .35s ease}
+#cp-support.on{display:block}
+#cp-support.vis{opacity:1}
+#cp-support .cps-frame{position:relative;padding:.9vh 1.8vh .9vh;background:linear-gradient(90deg,rgba(8,6,10,.78),rgba(18,6,8,.62));
+  border:1px solid var(--r2);clip-path:polygon(0 0,calc(100% - 1.6vh) 0,100% 1.6vh,100% 100%,0 100%)}
+#cp-support .cps-frame::before{content:"";position:absolute;left:-1px;top:2.2vh;bottom:2.2vh;width:.35vh;background:var(--r)}
+#cp-support .cps-head{display:flex;align-items:center;gap:1.2vh;margin-bottom:1.3vh}
+#cp-support .cps-ico{flex:none;display:grid;place-items:center;width:3.4vh;height:3.4vh;border:1px solid var(--c);box-shadow:inset 0 0 0 2px rgba(32,240,240,.12)}
+#cp-support .cps-ico img{width:2.3vh;height:2.3vh;object-fit:contain}
+#cp-support .cps-title{margin:0;color:var(--r);font:600 2.5vh/1 Rajdhani,system-ui,sans-serif;letter-spacing:.02em}
+#cp-support .cps-micro{margin:.5vh 0 0;color:var(--r2);font:500 1.15vh/1.2 "JetBrains Mono",ui-monospace,monospace;letter-spacing:.08em;text-transform:uppercase}
+#cp-support .cps-list{list-style:none;margin:0;padding:0}
+#cp-support .cps-item{position:relative;display:flex;align-items:center;justify-content:space-between;padding:.85vh .9vh .85vh 1.1vh;
+  color:var(--r);text-decoration:none;font:600 2.25vh/1 Rajdhani,system-ui,sans-serif;letter-spacing:.03em;text-transform:uppercase;
+  outline:none;cursor:pointer;transition:color .12s ease}
+#cp-support .cps-item::after{content:"";position:absolute;left:0;right:0;bottom:0;height:2px;background:var(--c);
+  transform:scaleX(0);transform-origin:left;transition:transform .16s ease}
+#cp-support .cps-item .cps-mark{width:2.6vh;height:2.6vh;border:1px solid transparent;display:grid;place-items:center;transition:border-color .12s}
+#cp-support .cps-item .cps-mark i{width:1.1vh;height:.35vh;background:transparent;transition:background .12s}
+#cp-support .cps-item:hover,#cp-support .cps-item:focus-visible{color:var(--c);text-shadow:0 0 1.2vh rgba(32,240,240,.35)}
+#cp-support .cps-item:hover::after,#cp-support .cps-item:focus-visible::after{transform:scaleX(1)}
+#cp-support .cps-item:hover .cps-mark,#cp-support .cps-item:focus-visible .cps-mark{border-color:var(--c)}
+#cp-support .cps-item:hover .cps-mark i,#cp-support .cps-item:focus-visible .cps-mark i{background:var(--c)}
+#cp-support .cps-sub{display:block;margin-top:.45vh;color:var(--r2);font:500 1.3vh/1 Rajdhani,system-ui,sans-serif;letter-spacing:.06em;text-transform:none}
+#cp-support .cps-item:hover .cps-sub{color:var(--c2)}
+@media (max-aspect-ratio:1/1){#cp-support{right:3vw;width:min(70vw,46vh)}}
+#cp-support .cps-lbl{display:inline-flex;align-items:center;gap:1.1vh}
+#cp-support .cps-ic{display:inline-grid;place-items:center;width:2.4vh;height:2.4vh;flex:none}
+#cp-support .cps-ic svg{width:2.1vh;height:2.1vh}
+#cp-support .cps-ic img{width:2.4vh;height:2.4vh;object-fit:contain}
+  </style>
+  <script id="cp-support-js">
+// [support] "Support the project" panel on the right side of the game's main menu, styled like the native menu, while the game's MAIN MENU is up (not in-game,
+// not while loading). Shows the X account, matching the
+// cyberpunk2077.lol home page. Main menu = the game shows its menu cursor and there is no player in a world
+// (cp2077DebugState(): no player, or the menu's placeholder puppet at the world origin with no quest).
+(function () {
+  "use strict";
+  var XURL = "https://x.com/omonkeyzz";
+  var XSVG = '<svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>';
+  var root = null;
+  function build() {
+    root = document.createElement("div"); root.id = "cp-support"; root.setAttribute("role", "navigation"); root.setAttribute("aria-label", "Support the project");
+    root.innerHTML = '<div class="cps-frame">' +
+      '<ul class="cps-list">' +
+      '<li><a class="cps-item" href="' + XURL + '" target="_blank" rel="noopener noreferrer"><span class="cps-lbl"><span class="cps-ic">' + XSVG + '</span>@omonkeyzz</span><span class="cps-mark"><i></i></span></a></li>' +
+      '</ul></div>';
+    // keep clicks/keys/touches on the panel away from the game's own input handlers
+    ["mousedown", "mouseup", "click", "pointerdown", "pointerup", "touchstart", "touchend", "wheel", "keydown"].forEach(function (t) {
+      root.addEventListener(t, function (e) { e.stopPropagation(); }, {passive: true});
+    });
+    document.body.appendChild(root);
+  }
+  function baseMenu() {
+    var de = document.documentElement;
+    if (de.classList.contains("cp-loading") || document.getElementById("cp-loader") || G.CP_UNSUPPORTED) return false;
+    var c = document.querySelector("#cp2077-canvas");
+    if (!c) return false;
+    var cursor = c.dataset.cp2077InkCursor === "1" || c.dataset.cp2077Relative !== "1";
+    if (!cursor) return false;
+    var m = G.cp2077EngineModule, s = null;
+    try { s = m && typeof m.cp2077DebugState === "function" ? m.cp2077DebugState() : null; } catch (e) {}
+    if (s && s.torn) return root && root.classList.contains("on");   // mid-write: keep the current state
+    // the main menu has a placeholder puppet at the world origin and no quest; a real game has a quest or a world position
+    var p = s && s.player;
+    return !p || (!s.quest && Math.abs(p.x) < 50 && Math.abs(p.y) < 50 && Math.abs(p.z) < 50);
+  }
+  var G = globalThis;
+  // [menu-only] user 2026-10-22: the panel stayed up on New Game / difficulty screens. The engine exposes no
+  // "which menu screen" state, so track menu depth from input while the pre-game front end is up:
+  //  - the first confirm (Enter/Space/click) passes the start screen ("press to continue") -> main menu, depth 0
+  //  - a confirm on the main menu (Enter/Space, or a click in the menu column on the left) opens a sub-screen: depth+1
+  //  - inside sub-screens a click on the content goes deeper; Esc / Backspace or a click on the footer (BACK) goes up
+  // The panel shows only at depth 0 after the start screen. Leaving the front end (loading, in-game) resets all.
+  var pastStart = false, depth = 0;
+  function frontEnd() { return baseMenu(); }
+  addEventListener("keydown", function (e) {
+    if (!frontEnd() || e.repeat) return;
+    if (e.code === "Enter" || e.code === "NumpadEnter" || e.code === "Space") { if (!pastStart) pastStart = true; else if (e.code !== "Space") depth++; }   // Space does not pick menu items
+    else if ((e.code === "Escape" || e.code === "Backspace") && depth > 0) depth--;
+  }, true);
+  addEventListener("pointerdown", function (e) {
+    var c = document.querySelector("#cp2077-canvas"); if (!c || !frontEnd() || (root && root.contains(e.target))) return;   // real clicks may land on an overlay above the canvas
+    if (!pastStart) { pastStart = true; return; }
+    var r = c.getBoundingClientRect(), x = (e.clientX - r.left) / r.width, y = (e.clientY - r.top) / r.height;
+    if (e.button === 2 || y > 0.88) { if (depth > 0) depth--; }
+    else if (depth > 0 || x < 0.42) depth++;
+  }, true);
+  function tick() {
+    if (!document.body) return;
+    if (!root) build();
+    var base = baseMenu();
+    if (!base && !(root && root.classList.contains("on"))) { if (document.getElementById("cp-loader") || (G.cp2077EngineModule && G.cp2077EngineModule.cp2077DebugState && (G.cp2077EngineModule.cp2077DebugState() || {}).quest)) { pastStart = false; depth = 0; } }
+    var on = base && pastStart && depth === 0;
+    if (on !== root.classList.contains("on")) {
+      root.classList.toggle("on", on);
+      if (on) requestAnimationFrame(function () { root.classList.add("vis"); }); else root.classList.remove("vis");
+    }
+  }
+  setInterval(tick, 500);
+})();
+// [vidwarm] user 2026-10-22: pre-warm the lifepath-card videos (predecoded gzip frames) into Cache Storage at the main
+// menu so hovering a card never waits on the network: manifest + first WARM_FRAMES frames of each, one range request
+// per video, stored under the keys predecoded-bink-frames-web.mjs reads. Desktop only; once per browser (marker key).
+(function () {
+  var G = globalThis, HASHES = ["e2d45bc245a1f1fb62e62f61674da70250c3fdb34338d47b076bed823190e17b",
+    "b04fc828038e4bbe1a9b269bed1b8eea533b93519bf670367ded62186e046d6f", "073a32b10641d5c9e74cfdbeff0d006724f88b7d2474f0b52e6cfac4af38af24"];
+  var WARM_FRAMES = 60, KEY = function (h, w) { return "https://video-cache.cyberpunk2077.lol/pre/" + h + "/" + w; };
+  function warmOne(c, base, h) {
+    return c.match(KEY(h, "warm-done")).then(function (done) {
+      if (done) return;
+      return fetch(base + "/runtime/codec/bink/predecoded/" + h + "/manifest.json").then(function (r) {
+        if (!r.ok) throw new Error("manifest " + r.status); return r.arrayBuffer();
+      }).then(function (mb) {
+        var m = JSON.parse(new TextDecoder().decode(mb)); if (m.assetSHA256 !== h) throw new Error("identity");
+        c.put(KEY(h, "manifest.json"), new Response(mb));
+        var rows = m.frames.slice(0, WARM_FRAMES), a = rows[0].packOffset, last = rows[rows.length - 1], b = last.packOffset + last.compressedBytes - 1;
+        return fetch(base + "/runtime/codec/bink/predecoded/" + h + "/frames.gzpack", {cache: "no-store", headers: {Range: "bytes=" + a + "-" + b}})
+          .then(function (r) { if (r.status !== 206) throw new Error("range " + r.status); return r.arrayBuffer(); })
+          .then(function (buf) {
+            if (buf.byteLength !== b - a + 1) throw new Error("short");
+            var puts = rows.map(function (row, i) {
+              var off = row.packOffset - a; return c.put(KEY(h, "f" + (i + 1)), new Response(buf.slice(off, off + row.compressedBytes)));
+            });
+            return Promise.all(puts).then(function () { return c.put(KEY(h, "warm-done"), new Response("1")); });
+          });
+      });
+    });
+  }
+  G.cp2077VideoPrewarm = function () {
+    if (G.cp2077VideoPrewarmStarted || G.CP_ENGINE_W32 || !G.CPB || typeof caches !== "object") return;
+    G.cp2077VideoPrewarmStarted = true;
+    caches.open("cp2077-video-v1").then(function (c) {
+      return HASHES.reduce(function (p, h) { return p.then(function () { return warmOne(c, G.CPB, h).catch(function (e) { console.warn("CP2077 video prewarm " + h.slice(0, 8) + ": " + e); }); }); }, Promise.resolve());
+    }).then(function () { console.log("CP2077 video prewarm done"); }, function () {});
+  };
+})();
+// [vidwarm trigger] 15 s after the loader is gone (front end up), once per page
+(function () {
+  var t = setInterval(function () {
+    if (document.getElementById("cp-loader") || document.documentElement.classList.contains("cp-loading")) return;
+    clearInterval(t); setTimeout(function () { try { globalThis.cp2077VideoPrewarm(); } catch (e) {} }, 15000);
+  }, 2000);
+})();
+// [vo] Voice-over player (default on; ?vo=0 disables). The port ships no Wwise VO banks; the engine overlay
+// audioSceneUtils.cpp calls cp2077VO(ruidHi, ruidLo, variant 1=f|2=m, flags 1=player|2=rewind|4=holocall|8=helmet,
+// seekSeconds) when a dialogue line starts. Lines come from one pack: <CPB>/runtime/vo/en_us.pack + en_us.index.json
+// ({"<16-hex RUID>_<f|m>": [offset, length]}, real actor recordings under "r/<id>_<v>"), fetched with a Range
+// request per line and decoded with the game's own AudioContext. One voice at a time: a new line stops the last one.
+(function () {
+  var q = new URLSearchParams(location.search);
+  if (q.get("vo") === "0") return;
+  var stats = globalThis.cp2077VOStats = {calls: 0, played: 0, missing: 0, errors: 0, last: null, index: 0};
+  var cur = null, seq = 0, cache = new Map(), indexP = null;
+  var base = function () { return globalThis.CPB + "/runtime/vo/"; };
+  var index = function () {
+    if (!indexP) indexP = fetch(base() + "en_us.index.json").then(function (r) { return r.ok ? r.json() : {}; })
+      .then(function (j) { stats.index = Object.keys(j).length; return j; }, function () { indexP = null; stats.errors++; return {}; });
+    return indexP;
+  };
+  var ctx = function () { var m = globalThis.cp2077EngineModule, a = m && m.cp2077Audio; return a && a.context && a.context.state !== "closed" ? a.context : null; };
+  var hex8 = function (n) { return ("00000000" + (n >>> 0).toString(16)).slice(-8); };
+  var load = function (c, key, ent) {
+    if (cache.has(key)) return cache.get(key);
+    var p = fetch(base() + "en_us.pack", {headers: {Range: "bytes=" + ent[0] + "-" + (ent[0] + ent[1] - 1)}})
+      .then(function (r) { return r.ok ? r.arrayBuffer() : null; })
+      .then(function (b) { return b && b.byteLength === ent[1] ? c.decodeAudioData(b) : null; })
+      .catch(function () { stats.errors++; return null; });
+    cache.set(key, p);
+    if (cache.size > 48) cache.delete(cache.keys().next().value);
+    return p;
+  };
+  // warm the index once the game is up so the first line does not wait for it
+  var w = setInterval(function () { if (globalThis.CPB && ctx()) { clearInterval(w); index(); } }, 3000);
+  globalThis.cp2077VO = async function (hi, lo, variant, flags, seek) {
+    stats.calls++;
+    var c = ctx(); if (!c || !globalThis.CPB) return;
+    var my = ++seq, id = hex8(hi) + hex8(lo), v = variant === 2 ? "m" : "f", o = v === "m" ? "f" : "m";
+    var ix = await index();
+    var key = ["r/" + id + "_" + v, id + "_" + v, "r/" + id + "_" + o, id + "_" + o].find(function (k) { return ix[k]; });
+    if (!key) { if (my === seq) { stats.missing++; stats.last = id + "_" + v + " (missing)"; } return; }
+    var buf = await load(c, key, ix[key]);
+    if (my !== seq) return;                         // a newer line started while this one was loading
+    stats.last = key;
+    if (!buf) { stats.missing++; return; }
+    if (cur) { try { cur.stop(); } catch (e) {} }
+    var s = c.createBufferSource(); s.buffer = buf; s.connect(c.destination);
+    s.start(0, Math.max(0, Math.min(+seek || 0, buf.duration - 0.05)));
+    cur = s; stats.played++;
+    s.onended = function () { if (cur === s) cur = null; };
+  };
+})();
+</script>
+</head>
+<body>
+<div id="cp-loader" role="status" aria-live="polite">
+  <div class="cp-bg"></div><div class="cp-grid"></div><div class="cp-scan"></div><div class="cp-vign"></div>
+  <div class="cp-tip"><span>NETWATCH // SECURE LINK <span class="cp-live">● ONLINE</span></span><span id="cp-clock">EDGE · 00:00</span></div>
+  <main class="cp-wrap">
+    <div class="cp-logo" id="cp-logo" role="img" aria-label="Cyberpunk 2077 Browser"></div>
+    <p class="cp-hint" id="cp-hint"></p>
+    <div class="cp-err" id="cp-err" hidden><b>Cannot start</b><p id="cp-err-msg"></p><button type="button" onclick="location.reload()">Retry</button></div>
+    <p class="cp-slow" id="cp-slow" hidden>Still loading… (slow connection?) Keep this tab open.</p>
+  </main>
+  <section class="cp-hud">
+    <div class="cp-row">
+      <div class="cp-stage"><i class="cp-dot"></i><span id="cp-stage">Establishing link</span></div>
+      <div class="cp-pct"><span id="cp-pct">0</span><small>%</small></div>
+    </div>
+    <div class="cp-bar"><div class="cp-fill" id="cp-fill"></div></div>
+    <div class="cp-ticks"><div class="cp-steps" id="cp-steps"></div><div class="cp-meta" id="cp-meta">connecting…</div></div>
+  </section>
+</div>
+<script>
+(()=>{const $=id=>document.getElementById(id);
+const H=['Assets stream on demand: only what you see is downloaded.','First load is the slowest. The engine is <em>cached</em> for next time.',
+'Archives stream on demand, so the <em>first minutes</em> load the most.','Chrome or Edge with <em>WebGPU</em> gives the best performance.',
+'Click the game once it appears to capture the mouse.'];let hi=0;
+function hint(){const h=$('cp-hint');if(!h)return;h.style.opacity=0;setTimeout(()=>{h.innerHTML=H[hi++%H.length];h.style.opacity=1},400)}
+hint();const a=setInterval(()=>{if(!$('cp-loader'))return clearInterval(a);hint()},5200);
+const b=setInterval(()=>{const l=$('cp-logo');if(!l)return clearInterval(b);l.classList.add('glitch');setTimeout(()=>l.classList.remove('glitch'),90+Math.random()*90)},2600);
+const c=setInterval(()=>{const e=$('cp-clock');if(!e)return clearInterval(c);e.textContent='EDGE · '+new Date().toTimeString().slice(0,5)},1000);})();
+</script>
+
+  <!-- Only the original engine renders into this canvas; no HTML menu UI. -->
+  <canvas id="cp2077-canvas" tabindex="0"></canvas>
+  <script>globalThis.cp2077AsyncPresentDefault = 1; // [opt] async present on by default; ?asyncPresent=0 turns it off</script>
+  <script>if(/[?&]assetTrace=1(&|$)/.test(location.search))document.write('<script src="'+CPB+'/runtime/asset-trace.js"><\/script>'); // [cloudflare] opt-in asset request trace</script>
+  <script>if(/[?&](blockFetch|prefetch)=/.test(location.search))document.write('<script src="'+CPB+'/runtime/block-fetch.js"><\/script>'); // [cloudflare] opt-in widened block reads / boot prefetch</script>
+  <script>if(CPB)document.write('<script src="'+CPB+'/runtime/gpu-upload-telemetry.js"><\/script>')</script>
+  <script>if(CPB)document.write('<script src="'+CPB+'/runtime/performance-overlay.js"><\/script>')</script>
+  <script>if(CPB)document.write('<script src="'+CPB+'/runtime/cp2077-jump.js"><\/script>')</script>
+  <script>if(CPB)document.write('<script src="'+CPB+'/runtime/live-telemetry.js"><\/script>')</script>
+  <script>if(CPB&&!globalThis.CP_ENGINE_BLOCK)document.write('<script src="'+CPB+'/runtime/engine-versions/'+(globalThis.CP_ENGINE||'2942ad1a30a3f73351868818010eab00d57d051ef956081c609a3e24134dfaea')+'/cp2077.js?loaderio=1'+(globalThis.CP_ENGINE_Q||'')+'"><\/script>')</script>
+  <script>globalThis.cp2077LoaderConfig={"bundle":"2942ad1a30a3f73351868818010eab00d57d051ef956081c609a3e24134dfaea","wasmSize":248252720,"wasmGz":56563278,"dataSize":5175666,"dataGz":2517479,"jsGz":144682};</script>
+  <script src="/game/loader.js"></script>
+  <script>
+    (async () => {
+      if (!globalThis.isSecureContext || !globalThis.crossOriginIsolated) {
+        throw new Error('Native engine needs a secure origin and COOP/COEP headers for its worker threads.');
+      }
+      if (typeof createCP2077 !== 'function') {
+        throw new Error('Native engine build is missing: build/game/cp2077.js has not linked successfully.');
+      }
+      const canvas = document.getElementById('cp2077-canvas');
+      const nativeGpuDiagnostics = [];
+      const nativeOMStateDiagnostics=[];
+      const nativeBufferDiagnostics = [];
+      const mappedUploadDiagnostics=[];
+      const nativeTextureFormatDiagnostics = [];
+      const nativeGameStateDiagnostics = [];
+      const nativeLocalizationDiagnostics=[];
+      const nativeSessionMenuDiagnostics = [];
+      const nativeGraphicsResourceDiagnostics = [];
+      const nativeGpuRetirementDiagnostics = [];
+      const nativeLoadingStageDiagnostics = [];
+      const nativeMultilayerDemandDiagnostics = [];
+      const nativeEnvironmentStartupDiagnostics = [];
+      const nativeHandleDiagnostics = [];
+      const nativeComputeDiagnostics = [];
+      const nativeDepthBindingDiagnostics = [];
+      const nativeScriptBindingDiagnostics = [];
+      const nativeShaderDiagnostics = [];
+      const nativeMaterialShaderDiagnostics=[];
+      const nativeMaterialShaderMessages=new Set();
+      const nativeShadowShaderDiagnostics = [];
+      const nativeShaderMessages = new Set();
+      const nativeWebGpuErrors = [];
+      const nativeWebGpuErrorMessages = new Set();
+      const initializationJobs = {};
+      const allocatorMemoryDiagnostics = [];
+      const engineFramePhaseDiagnostics = [];
+      const renderWorkerDiagnostics = [];
+      const gpuHandoffDelayDiagnostics=[];
+      const originalReadbackChecks=[];
+      const browserSchedulingDiagnostics={timerSamples:0,maxTimerLagMs:0,slowTimers:[],longTasks:[]};
+      let browserProbeExpected=performance.now()+100;
+      const browserProbeTimer=setInterval(()=>{
+        const now=performance.now(),lag=Math.max(0,now-browserProbeExpected);
+        browserProbeExpected=now+100;
+        ++browserSchedulingDiagnostics.timerSamples;
+        browserSchedulingDiagnostics.maxTimerLagMs=Math.max(browserSchedulingDiagnostics.maxTimerLagMs,lag);
+        if(lag>=20){const rows=browserSchedulingDiagnostics.slowTimers;if(rows.length>=64)rows.shift();rows.push({at:now,lagMs:lag});}
+      },100);
+      if(globalThis.PerformanceObserver && PerformanceObserver.supportedEntryTypes.includes('longtask')){
+        new PerformanceObserver(list=>{for(const entry of list.getEntries()){
+          const rows=browserSchedulingDiagnostics.longTasks;if(rows.length>=64)rows.shift();
+          rows.push({startMs:entry.startTime,durationMs:entry.duration,name:entry.name});
+        }}).observe({type:'longtask',buffered:true});
+      }
+      const module = await createCP2077({
+        canvas,
+        arguments:['-qualityLevel=Low','-texQualityLevel=Low',
+          ...((q=>q.has('skipStartScreen')||q.get('start')==='nomadquest'||q.get('start')==='nomad')(new URLSearchParams(location.search)) ? ['-skipStartScreen'] : []),
+          // [missionflow] ?start=nomad (alias ?start=nomadquest) = the REAL Nomad prologue new game (q000_nomad): only -skipStartScreen here;
+          // the engine (gameFramework preGameRequestsHandler.cpp overlay) calls the menu's own StartNewGame with the default Nomad
+          // character as soon as the main menu is up. No sandbox params, so no sandbox hooks; saves as in the real game.
+          // [nomad] ?start=nomadfree (was ?start=nomad): free roam in Night City at the Nomad prologue garage (q000 Yucca, Badlands), no quest:
+          // -world=base\worlds\03_night_city\03_night_city.world -startPosition near q000_town_garage (cooked area:
+          // archive/pc/content/basegame_zz_nomad*.archive). &startPos=x,y,z / &startYaw=deg override. The URL gets
+          // sandboxWorld/sandboxPos added (history.replaceState) so the engine's sandbox autosave gate stays OFF.
+          // &startVehicle=N (opt-in) also adds sandbox=nomad&sandboxVehicles=N&sandboxWeapons=0 -> [sandbox-spawn]/[coreplay]
+          // spawn N vehicles 10 m ahead of the player (plus their F-enter/flight helpers and the 1.2 km floor box at the origin, far away).
+          ...(()=>{const q=new URLSearchParams(location.search);
+            if(q.get('start')!=='nomadfree')return [];
+            const bs=String.fromCharCode(92);
+            const world=['base','worlds','03_night_city','03_night_city.world'].join(bs);
+            let pos=(q.get('startPos')||'-3970.5,-6503.8,78').split(',').map(Number);
+            if(!(pos.length===3&&pos.every(Number.isFinite)))pos=[-3958.0,-6488.0,77.0];
+            const yaw=Number(q.get('startYaw')||0)||0;
+            try{q.set('sandboxWorld',world.split(bs).join('/'));q.set('sandboxPos',pos.join(','));
+              const nv=parseInt(q.get('startVehicle')||'0',10);
+              if(nv>0){q.set('sandbox','nomad');q.set('sandboxVehicles',String(nv));if(!q.has('sandboxNear'))q.set('sandboxNear','1');if(!q.has('sandboxWeapons'))q.set('sandboxWeapons','0');}
+              history.replaceState(history.state,'',location.pathname+'?'+q.toString()+location.hash);}catch(e){console.warn('[nomad] replaceState failed',e);}
+            console.log('[nomad] start=nomadfree world='+world+' pos='+pos.join(',')+' yaw='+yaw);
+            return (q.has('skipStartScreen')?[]:['-skipStartScreen']).concat('-world='+world,'-startPosition={X='+pos[0]+',Y='+pos[1]+',Z='+pos[2]+'}','-startRotation={Yaw='+yaw+'}');})(),
+          // ?sandbox=1: start a session directly in the gyms\gym_plate baseplate world (1 km x 1 km flat plane with collision,
+          // archive/pc/content/basegame_zz_sandbox_plate.archive) through the engine's own command-line session path
+          // (gsm Initialization -> Session -> SessionNewGame): no start screen, no main menu, no character creation, no quest.
+          // Overrides: ?sandbox=empty (original 100 m gyms\gym_empty via its gamedef), ?sandboxGamedef=<res path .gamedef>,
+          // ?sandboxWorld=<res path .world>, ?sandboxPos=x,y,z (player start for -world, default 0,0,1).
+          // [gym-vehicles] ?sandbox=vehicles: depot vehicle test gym gyms\gym_vehicles via its gamedef (spawn tag 'spawn' + empty.quest
+          // teleport to #mount_test_spawn; archive basegame_zz_sandbox_vehicles.archive). With ?sandboxPos it uses -world + -startPosition
+          // instead (the engine ignores -startPosition when -gameDefinition is given). ?sandbox=plate = the flat gym_plate.
+          ...(()=>{const q=new URLSearchParams(location.search);
+            if(q.get('start')==='nomadfree'||(!q.has('sandbox')&&!q.has('sandboxWorld')&&!q.has('sandboxGamedef')))return [];
+            const bs=String.fromCharCode(92);
+            const res=k=>{const v=(q.get(k)||'').split('/').join(bs);return /^[A-Za-z0-9_.\\-]+$/.test(v)?v:'';};
+            const a=q.has('skipStartScreen')?[]:['-skipStartScreen'];
+            const sb=q.get('sandbox')||'';
+            const veh=sb==='vehicles'&&!res('sandboxWorld')&&!res('sandboxGamedef');
+            if(veh&&q.has('sandboxPos')){
+              let vp=q.get('sandboxPos').split(',').map(Number);if(!(vp.length===3&&vp.every(Number.isFinite)))vp=[0,0,1];
+              const yaw=Number(q.get('sandboxYaw')||0)||0;
+              return a.concat('-world='+['gyms','gym_vehicles','gym_vehicles.world'].join(bs),'-startPosition={X='+vp[0]+',Y='+vp[1]+',Z='+vp[2]+'}','-startRotation={Yaw='+yaw+'}');}
+            const gd=res('sandboxGamedef')||(sb==='empty'?['gyms','gym_empty','gym_empty.gamedef'].join(bs):veh?['gyms','gym_vehicles','gym_vehicle.gamedef'].join(bs):'');
+            if(gd)return a.concat('-gameDefinition='+gd);
+            const world=res('sandboxWorld')||['gyms','gym_plate','gym_plate.world'].join(bs);
+            let pos=(q.get('sandboxPos')||'0,0,1').split(',').map(Number);
+            if(!(pos.length===3&&pos.every(Number.isFinite)))pos=[0,0,1];
+            return a.concat('-world='+world,'-startPosition={X='+pos[0]+',Y='+pos[1]+',Z='+pos[2]+'}','-startRotation={Yaw=0}');})()],
+        cp2077RenderWidth:1280,
+        cp2077RenderHeight:720,
+        locateFile: name => new URL('/runtime/engine-versions/'+(globalThis.CP_ENGINE||'2942ad1a30a3f73351868818010eab00d57d051ef956081c609a3e24134dfaea')+'/' + name, document.baseURI).href,
+        print: message => console.log(message),
+        printErr: message => {
+          if(/^CP2077 mapped upload probe:/.test(message)){if(mappedUploadDiagnostics.length>=64)mappedUploadDiagnostics.shift();mappedUploadDiagnostics.push({timestamp:new Date().toISOString(),message});}
+          if(/^CP2077 OM state rejection probe:/.test(message)&&nativeOMStateDiagnostics.length<32)nativeOMStateDiagnostics.push({timestamp:new Date().toISOString(),message});
+          if(/^CP2077 localization probe:/.test(message))nativeLocalizationDiagnostics.push({timestamp:new Date().toISOString(),message});
+          if(/^CP2077 session menu gate probe:/.test(message)){if(nativeSessionMenuDiagnostics.length>=128)nativeSessionMenuDiagnostics.shift();nativeSessionMenuDiagnostics.push({timestamp:new Date().toISOString(),message});}
+          if(/^CP2077 original GPU readback checks:/.test(message))originalReadbackChecks.push({timestamp:new Date().toISOString(),message});
+          if(/^CP2077 GPU (handoff|binding) delay probe:/.test(message) && gpuHandoffDelayDiagnostics.length<192)
+            gpuHandoffDelayDiagnostics.push({timestamp:new Date().toISOString(),message});
+          if(/^CP2077 (render (node|job) cost|frame job wait|command lock cost|draw stage cost|GPU (handoff|binding) delay|GPU allocation wait) probe:/.test(message)) {
+            if(renderWorkerDiagnostics.length===512)renderWorkerDiagnostics.shift();
+            renderWorkerDiagnostics.push({timestamp:new Date().toISOString(),message});
+          }
+          if(/^CP2077 (?:engine frame|game engine) phases probe:/.test(message)) {
+            if(engineFramePhaseDiagnostics.length>=64)engineFramePhaseDiagnostics.shift();
+            engineFramePhaseDiagnostics.push({timestamp:new Date().toISOString(),message});
+          }
+          if(/^CP2077 ((allocator (memory|range)|outer frame|segmented TLSF) probe:|segmented TLSF checks passed:)/.test(message)) {
+            if(allocatorMemoryDiagnostics.length===512) allocatorMemoryDiagnostics.shift();
+            allocatorMemoryDiagnostics.push({timestamp:new Date().toISOString(),message});
+          }
+          if(/^CP2077 (loading (stage|UI)|game state|runtime readiness|puppet (load|camera|customization|ready|demand)) probe:/.test(message)){
+            if(nativeLoadingStageDiagnostics.length>=64)nativeLoadingStageDiagnostics.shift();
+            nativeLoadingStageDiagnostics.push({timestamp:new Date().toISOString(),message});
+          }
+          if(nativeGpuRetirementDiagnostics.length<64 && /^CP2077 GPU retirement probe:/.test(message))
+            nativeGpuRetirementDiagnostics.push({timestamp:new Date().toISOString(),message});
+          if(nativeMultilayerDemandDiagnostics.length<64 && /^CP2077 multilayer demand probe:/.test(message))
+            nativeMultilayerDemandDiagnostics.push({timestamp:new Date().toISOString(),message});
+          if(/^CP2077 environment startup probe:/.test(message)) {
+            if(nativeEnvironmentStartupDiagnostics.length>=256)nativeEnvironmentStartupDiagnostics.shift();
+            nativeEnvironmentStartupDiagnostics.push({timestamp:new Date().toISOString(),message});
+          }
+          if(nativeGraphicsResourceDiagnostics.length<192 && /^CP2077 graphics resource probe:/.test(message))
+            nativeGraphicsResourceDiagnostics.push({timestamp:new Date().toISOString(),message});
+          if(nativeGameStateDiagnostics.length<96 && /^CP2077 (game (state|frame)|shadow binding) probe:/.test(message))
+            nativeGameStateDiagnostics.push({timestamp:new Date().toISOString(),message});
+          if(nativeTextureFormatDiagnostics.length<16 && /^CP2077 texture format probe:/.test(message))
+            nativeTextureFormatDiagnostics.push({timestamp:new Date().toISOString(),message});
+          if(nativeBufferDiagnostics.length<32 && /^CP2077 buffer (lock|upload) probe:/.test(message))
+            nativeBufferDiagnostics.push({timestamp:new Date().toISOString(),message});
+          if (nativeShadowShaderDiagnostics.length<32 && /name=m_shader(?:RayTraced)?GlobalShadow/.test(message))
+            nativeShadowShaderDiagnostics.push({timestamp:new Date().toISOString(),message});
+          if (nativeDepthBindingDiagnostics.length < 32 && /^CP2077 depth SRV probe:/.test(message))
+            nativeDepthBindingDiagnostics.push({timestamp:new Date().toISOString(),message});
+          if (nativeComputeDiagnostics.length < 32 && /^CP2077 compute resource probe:/.test(message))
+            nativeComputeDiagnostics.push({timestamp:new Date().toISOString(),message});
+          if (nativeHandleDiagnostics.length < 16 && /^CP2077 script handle probe:/.test(message))
+            nativeHandleDiagnostics.push({timestamp:new Date().toISOString(),message});
+          if (nativeScriptBindingDiagnostics.length < 32 && /^CP2077 script binding probe:/.test(message))
+            nativeScriptBindingDiagnostics.push({timestamp:new Date().toISOString(),message});
+          if (nativeWebGpuErrors.length < 64 && !nativeWebGpuErrorMessages.has(message) &&
+              /^CP2077 WebGPU(?:: (validation error|device lost):| (binding\/encoding|(?:compute )?shader creation|texture allocation|texture view|image upload|buffer allocation) failed:)/.test(message)) {
+            nativeWebGpuErrorMessages.add(message);
+            nativeWebGpuErrors.push({timestamp:new Date().toISOString(),message});
+          }
+          if (nativeShaderDiagnostics.length < 64 && !nativeShaderMessages.has(message) &&
+              /^CP2077 WebGPU: (graphics shader has no exact|shader requires an exact)/.test(message)) {
+            nativeShaderMessages.add(message);
+            nativeShaderDiagnostics.push({timestamp:new Date().toISOString(),message});
+          }
+          if(/^CP2077 WebGPU: graphics shader has no exact original-bytecode conversion:/.test(message)&&!nativeMaterialShaderMessages.has(message)&&nativeMaterialShaderDiagnostics.length<256){
+            nativeMaterialShaderMessages.add(message);
+            nativeMaterialShaderDiagnostics.push({timestamp:new Date().toISOString(),message});
+          }
+          const job=/^CP2077 native init job: phase=(enter|returned) name=(.+)$/.exec(message);
+          if(job){
+            const record=initializationJobs[job[2]] ||= {entered:0,returned:0};
+            record[job[1]==='enter'?'entered':'returned']++;
+            record.phase=job[1];record.timestamp=new Date().toISOString();
+          }
+          if (nativeGpuDiagnostics.length < 64 &&
+              /^CP2077 ((script call|script handle|buffer lock|blue noise|texture array|blob upload|shader identity) probe:|rejected texture binding:|original (uniform|constant).*rejection:|WebGPU: (unsupported .*descriptor:|draw state rejection:|attachment clear failed:))/.test(message)) {
+            nativeGpuDiagnostics.push({timestamp:new Date().toISOString(), message});
+          }
+          const diagnostic=/^CP2077 (reserve #|(?:dynamic-linear|segmented TLSF) checks passed:|native (resource filesystem mounted|state enter:|initializer begin:|init job:|GPU constant repack:)|[^:]+ probe:)/.test(message);
+          if(diagnostic && !/\b(failed|failure|rejected|rejection|unsupported|unavailable|invalid)\b/i.test(message))
+            console.debug(message);
+          else console.error(message);
+        }
+      });
+      globalThis.cp2077EngineModule = module;
+      module.cp2077TraceExport=async()=>{
+        if(!module.cp2077TraceExports)throw Error('Native trace exports not initialized');
+        const {createMainTrace}=await import('/runtime/wgtrace_main.js');
+        const trace=createMainTrace({module:module.cp2077TraceExports,heapProvider:module.cp2077TraceHeapProvider});
+        const result=trace.exportTrace();result.meta.integration='Existing outer frames, native job runs/counter waits, GPU proxies, resource validation groups, and canvas presentation. Worker job enqueue/dependency IDs not mapped; those waits remain unresolved.';
+        result.meta.jobNames=module.cp2077TraceReadNames();
+        result.meta.callKinds=result.meta.jobNames;
+        return result;
+      };
+      module.cp2077AllocatorMemoryDiagnostics = allocatorMemoryDiagnostics;
+      module.cp2077EngineFramePhaseDiagnostics = engineFramePhaseDiagnostics;
+      module.cp2077RenderWorkerDiagnostics = renderWorkerDiagnostics;
+      module.cp2077BrowserSchedulingDiagnostics=browserSchedulingDiagnostics;
+      module.cp2077GpuHandoffDelayDiagnostics=gpuHandoffDelayDiagnostics;
+      module.cp2077OriginalReadbackChecks=originalReadbackChecks;
+      module.cp2077NativeGpuDiagnostics = nativeGpuDiagnostics;
+      module.cp2077NativeBufferDiagnostics = nativeBufferDiagnostics;
+      module.cp2077MappedUploadDiagnostics=mappedUploadDiagnostics;
+      module.cp2077NativeTextureFormatDiagnostics = nativeTextureFormatDiagnostics;
+      module.cp2077NativeGameStateDiagnostics = nativeGameStateDiagnostics;
+      module.cp2077NativeLocalizationDiagnostics=nativeLocalizationDiagnostics;
+      module.cp2077NativeSessionMenuDiagnostics = nativeSessionMenuDiagnostics;
+      module.cp2077NativeGraphicsResourceDiagnostics = nativeGraphicsResourceDiagnostics;
+      module.cp2077NativeGpuRetirementDiagnostics = nativeGpuRetirementDiagnostics;
+      module.cp2077NativeLoadingStageDiagnostics = nativeLoadingStageDiagnostics;
+      module.cp2077NativeMultilayerDemandDiagnostics = nativeMultilayerDemandDiagnostics;
+      module.cp2077NativeEnvironmentStartupDiagnostics = nativeEnvironmentStartupDiagnostics;
+      module.cp2077NativeHandleDiagnostics = nativeHandleDiagnostics;
+      module.cp2077NativeComputeDiagnostics = nativeComputeDiagnostics;
+      module.cp2077NativeDepthBindingDiagnostics = nativeDepthBindingDiagnostics;
+      module.cp2077NativeScriptBindingDiagnostics = nativeScriptBindingDiagnostics;
+      module.cp2077NativeShaderDiagnostics = nativeShaderDiagnostics;
+      module.cp2077NativeOMStateDiagnostics=nativeOMStateDiagnostics;
+      module.cp2077NativeMaterialShaderDiagnostics=nativeMaterialShaderDiagnostics;
+      module.cp2077NativeShadowShaderDiagnostics = nativeShadowShaderDiagnostics;
+      module.cp2077NativeWebGpuErrors = nativeWebGpuErrors;
+      module.cp2077InitializationJobs = initializationJobs;
+      canvas.focus();
+    })().catch(error => console.error('CP2077 native engine launch failed:', error));
+  </script>
+</body>
+</html>

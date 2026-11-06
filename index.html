@@ -1,0 +1,205 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Cyberpunk 2077 — Coming Soon</title>
+<meta name="theme-color" content="#050507" />
+<link rel="icon" type="image/png" sizes="32x32" href="/assets/icon-32.png" />
+<link rel="icon" type="image/png" sizes="512x512" href="/assets/icon-512.png" />
+<link rel="apple-touch-icon" href="/assets/icon-180.png" />
+<link rel="preconnect" href="https://fonts.googleapis.com" />
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@700;900&family=Rajdhani:wght@600;700&display=swap" rel="stylesheet" />
+<style>
+  :root { --yellow: #fcee0a; --cyan: #00f0ff; --red: #ff003c; --bg: #050507; }
+  html, body { height: 100%; margin: 0; }
+  body { background: var(--bg); color: #fff; overflow: hidden; user-select: none; -webkit-user-select: none; font-family: "Rajdhani", sans-serif; }
+
+  .layer { position: fixed; inset: 0; pointer-events: none; }
+
+  .bg { z-index: 0; overflow: hidden; background: var(--bg); }
+  .bg video {
+    position: absolute; inset: 0; width: 100%; height: 100%;
+    object-fit: cover; transition: opacity 1s ease; pointer-events: none;
+  }
+
+  .shade { z-index: 1; background: linear-gradient(180deg, rgba(5,5,7,.55) 0%, rgba(5,5,7,.25) 35%, rgba(5,5,7,.35) 65%, rgba(5,5,7,.85) 100%); }
+  .scan { z-index: 2; opacity: .18; background: repeating-linear-gradient(0deg, rgba(0,0,0,.9) 0 1px, transparent 1px 3px); }
+  .vignette { z-index: 3; background: radial-gradient(ellipse at center, transparent 45%, rgba(0,0,0,.75) 100%); }
+
+  .hero {
+    position: fixed; inset: 0; z-index: 10;
+    display: flex; flex-direction: column; align-items: center; justify-content: center;
+    text-align: center; padding: 0 16px; gap: 10px;
+  }
+  .appear { opacity: 0; animation: appear .8s cubic-bezier(.16,.84,.24,1) both; }
+  @keyframes appear { from { opacity: 0; transform: translateY(28px); filter: blur(6px); } to { opacity: 1; transform: none; filter: none; } }
+
+  .title {
+    position: relative; margin: 0;
+    font-family: "Orbitron", sans-serif; font-weight: 900;
+    font-size: clamp(44px, 9vw, 140px); line-height: .95; letter-spacing: .04em;
+    color: var(--yellow); text-transform: uppercase;
+    text-shadow: 4px 4px 0 var(--red), -2px -2px 0 rgba(0,240,255,.55), 0 0 40px rgba(252,238,10,.35);
+  }
+  .title .yr { display: block; font-size: .62em; letter-spacing: .32em; margin-left: .32em; color: var(--cyan); text-shadow: 3px 3px 0 var(--red), 0 0 30px rgba(0,240,255,.45); }
+  .glitch { position: relative; display: inline-block; }
+  .glitch::before, .glitch::after {
+    content: attr(data-text); position: absolute; inset: 0; overflow: hidden; pointer-events: none;
+  }
+  .glitch::before { color: var(--cyan); text-shadow: none; animation: g1 3.2s infinite steps(1); }
+  .glitch::after  { color: var(--red);  text-shadow: none; animation: g2 2.7s infinite steps(1); }
+  @keyframes g1 {
+    0%, 86%, 100% { clip-path: inset(100% 0 0 0); transform: none; }
+    87% { clip-path: inset(12% 0 70% 0); transform: translate(-6px, 0); }
+    90% { clip-path: inset(55% 0 20% 0); transform: translate(5px, 0); }
+    93% { clip-path: inset(30% 0 52% 0); transform: translate(-3px, 0); }
+  }
+  @keyframes g2 {
+    0%, 80%, 100% { clip-path: inset(100% 0 0 0); transform: none; }
+    81% { clip-path: inset(70% 0 8% 0); transform: translate(6px, 0); }
+    84% { clip-path: inset(5% 0 80% 0); transform: translate(-5px, 0); }
+    88% { clip-path: inset(42% 0 40% 0); transform: translate(4px, 0); }
+  }
+
+  .soon {
+    margin: 18px 0 0; font-family: "Orbitron", sans-serif; font-weight: 700;
+    font-size: clamp(22px, 3.2vw, 46px); letter-spacing: .42em; margin-right: -.42em;
+    color: #fff; text-transform: uppercase;
+    text-shadow: 0 0 18px rgba(0,240,255,.7), 0 0 2px #fff;
+    animation: flicker 6s infinite;
+  }
+  .soon { font-variant-numeric: tabular-nums; }
+  .soon-sub { margin: 8px 0 0; font-family: "Rajdhani", sans-serif; font-weight: 600; font-size: clamp(13px, 1.3vw, 17px);
+    letter-spacing: .32em; margin-right: -.32em; color: rgba(255,255,255,.6); text-transform: uppercase; }
+  @keyframes flicker {
+    0%, 18%, 22%, 25%, 53%, 57%, 100% { opacity: 1; }
+    20%, 24%, 55% { opacity: .35; }
+  }
+
+  .project-links {
+    margin-top: 30px; display: flex; flex-wrap: wrap;
+    align-items: center; justify-content: center; gap: 16px;
+  }
+  .x {
+    display: inline-flex; align-items: center; justify-content: center; gap: 12px;
+    padding: 13px 34px 12px 28px;
+    font-family: "Rajdhani", sans-serif; font-weight: 700;
+    font-size: clamp(20px, 2.2vw, 28px); letter-spacing: .12em; text-transform: uppercase;
+    color: #000; background: var(--yellow); text-decoration: none;
+    clip-path: polygon(0 0, calc(100% - 18px) 0, 100% 18px, 100% 100%, 18px 100%, 0 calc(100% - 18px));
+    box-shadow: 0 0 0 0 rgba(252,238,10,.0);
+    transition: background .15s ease, transform .15s ease, filter .15s ease;
+    pointer-events: auto; user-select: none;
+  }
+  .x:hover { background: var(--cyan); transform: translateY(-2px); filter: drop-shadow(0 0 14px rgba(0,240,255,.6)); }
+  .x:active { transform: scale(.98); }
+  .x:focus-visible { outline: 2px solid #fff; outline-offset: 4px; }
+  .x svg { width: .95em; height: .95em; }
+  .x.social { flex-direction: column; gap: 2px; }
+  .x.social .social-label { font-size: .62em; line-height: 1; letter-spacing: .16em; }
+  .x.social .social-name { display: inline-flex; align-items: center; gap: 10px; }
+  .play-row { margin-top: 30px; display: flex; justify-content: center; }
+  .x.play { font-size: clamp(24px, 2.8vw, 36px); padding: 16px 48px 15px 40px; background: var(--red); color: #fff; letter-spacing: .18em; }
+  .x.play:hover { background: var(--yellow); color: #000; filter: drop-shadow(0 0 18px rgba(252,238,10,.6)); }
+  .x.play svg { width: .8em; height: .8em; }
+  .play-row + .project-links { margin-top: 16px; }
+  @media (max-width: 600px) {
+    .project-links { flex-direction: column; gap: 12px; }
+    .project-links .x { box-sizing: border-box; width: 100%; padding: 13px 22px; }
+    .play-row .x.play { box-sizing: border-box; width: 100%; padding: 15px 22px; }
+  }
+
+  .tag {
+    position: fixed; bottom: 18px; left: 50%; transform: translateX(-50%); z-index: 10;
+    font-family: "Rajdhani", sans-serif; font-weight: 600; font-size: 13px; letter-spacing: .3em;
+    color: rgba(255,255,255,.45); text-transform: uppercase; white-space: nowrap;
+  }
+  .corner-logo {
+    position: fixed; top: 38px; right: 44px; z-index: 20;
+    width: clamp(150px, 18vw, 300px); height: auto;
+    filter: drop-shadow(0 6px 18px rgba(0,0,0,.6));
+    pointer-events: none; user-select: none;
+  }
+  .corner { position: fixed; z-index: 10; width: 46px; height: 46px; border-color: var(--yellow); border-style: solid; opacity: .7; }
+  .corner.tl { top: 18px; left: 18px; border-width: 2px 0 0 2px; }
+  .corner.tr { top: 18px; right: 18px; border-width: 2px 2px 0 0; }
+  .corner.bl { bottom: 18px; left: 18px; border-width: 0 0 2px 2px; }
+  .corner.br { bottom: 18px; right: 18px; border-width: 0 2px 2px 0; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .glitch::before, .glitch::after, .soon { animation: none; }
+  }
+</style>
+</head>
+<body>
+  <div class="layer bg">
+    <video id="v0" src="/assets/bg-loop.mp4" poster="/assets/bg-poster.jpg" autoplay muted playsinline preload="auto" disablepictureinpicture></video>
+    <video id="v1" src="/assets/bg-loop.mp4" muted playsinline preload="auto" disablepictureinpicture style="opacity:0"></video>
+  </div>
+  <div class="layer shade"></div>
+  <div class="layer scan"></div>
+  <div class="layer vignette"></div>
+
+  <div class="corner tl"></div><div class="corner tr"></div><div class="corner bl"></div><div class="corner br"></div>
+
+  <img class="corner-logo" src="/assets/logo.png" alt="Cyberpunk 2077 Browser" />
+
+  <section class="hero">
+    <div class="appear" style="animation-delay:120ms">
+      <h1 class="title"><span class="glitch" data-text="Cyberpunk">Cyberpunk</span><span class="yr">2077</span></h1>
+    </div>
+    <div class="appear" style="animation-delay:300ms">
+      <p class="soon" id="soon" role="timer">Coming Soon</p>
+      <p class="soon-sub" id="soon-sub">Until launch &middot; Oct 22 &middot; 5 PM CT</p>
+    </div>
+    <div class="appear play-row" style="animation-delay:420ms">
+      <a class="x play" href="/game"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M6 3.5v17l14-8.5z"/></svg>Play now</a>
+    </div>
+    <div class="appear project-links" style="animation-delay:480ms">
+      <a class="x social" href="https://x.com/omonkeyz" target="_blank" rel="noopener noreferrer"><span class="social-label">New Account</span><span class="social-name"><svg viewBox="0 0 24 24" aria-hidden="true"><path fill="currentColor" d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817L4.99 21.75H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231zm-1.161 17.52h1.833L7.084 4.126H5.117z"/></svg>@omonkeyz</span></a>
+    </div>
+  </section>
+
+  <div class="tag">cyberpunk2077.lol</div>
+
+<script>
+  const FADE = 1000;
+  const a = document.getElementById("v0"), b = document.getElementById("v1");
+  let swapping = false;
+  const arm = (cur, next) => cur.addEventListener("timeupdate", () => {
+    if (swapping || !cur.duration || (cur.duration - cur.currentTime) * 1000 > FADE) return;
+    swapping = true;
+    next.currentTime = 0; next.play().catch(() => {});
+    next.style.opacity = 1; cur.style.opacity = 0;
+    setTimeout(() => { cur.pause(); swapping = false; }, FADE + 80);
+  });
+  arm(a, b); arm(b, a);
+  a.play().catch(() => {});
+  window.addEventListener("pointerdown", () => {
+    if (a.paused && b.paused) a.play().catch(() => {});
+  }, { once: true });
+
+  // Launch countdown (same time as the /game page and the Worker gate: 2026-10-22 17:00 CT = 22:00 UTC).
+  let LAUNCH = Date.parse("2026-10-22T22:00:00Z"), skew = 0;
+  const soon = document.getElementById("soon"), sub = document.getElementById("soon-sub");
+  fetch("https://cp2077-port.fn-web-worker.workers.dev/__launch", {cache: "no-store"}).then(r => r.json())
+    .then(j => { if (j && j.now) { skew = j.now - Date.now(); if (j.launch) LAUNCH = j.launch; tick(); } }).catch(() => {});
+  const p2 = n => String(n).padStart(2, "0");
+  function tick() {
+    const ms = LAUNCH - (Date.now() + skew);
+    if (ms <= 0) {
+      soon.textContent = "Out Now";
+      sub.style.display = "none";
+      document.title = "Cyberpunk 2077 — Out Now";
+      return;
+    }
+    const t = Math.floor(ms / 1000), d = Math.floor(t / 86400), h = Math.floor(t / 3600) % 24, m = Math.floor(t / 60) % 60;
+    soon.textContent = (d ? d + "d " : "") + p2(h) + ":" + p2(m) + ":" + p2(t % 60);
+    clearTimeout(tick.t); tick.t = setTimeout(tick, 1000 - ((Date.now() + skew) % 1000) + 5);
+  }
+  tick();
+</script>
+</body>
+</html>

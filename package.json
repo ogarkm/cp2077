@@ -1,0 +1,17 @@
+{
+  "name": "cyberpunk2077",
+  "version": "1.0.0",
+  "description": "Cyberpunk 2077 Web Player & Teaser",
+  "main": "serve.py",
+  "scripts": {
+    "start": "python3 serve.py",
+    "dev": "python3 serve.py --open"
+  },
+  "keywords": [
+    "cyberpunk2077",
+    "webgpu",
+    "webassembly",
+    "gaming"
+  ],
+  "license": "MIT"
+}
