@@ -21,6 +21,8 @@ import socketserver
 import urllib.request
 import urllib.error
 import mimetypes
+import json
+import time
 import sys
 import os
 import re
@@ -29,6 +31,7 @@ PORT = int(os.environ.get("PORT", 8080))
 HOST = os.environ.get("HOST", "0.0.0.0")
 UPSTREAM_WORKER = os.environ.get("UPSTREAM_WORKER", "https://cp2077-port.fn-web-worker.workers.dev").rstrip("/")
 ORIGIN_SPOOF = os.environ.get("ORIGIN_SPOOF", "https://cyberpunk2077.lol")
+START_TIME = time.time()
 
 # Ensure correct MIME types
 mimetypes.add_type("application/wasm", ".wasm")
@@ -90,8 +93,27 @@ class CyberpunkHTTPHandler(http.server.SimpleHTTPRequestHandler):
                 return idx
         return None
 
+    def _handle_health_check(self, method="GET"):
+        payload = json.dumps({
+            "status": "healthy",
+            "service": "cyberpunk2077-web",
+            "uptime_seconds": round(time.time() - START_TIME, 2),
+            "upstream_worker": UPSTREAM_WORKER,
+        }, indent=2).encode("utf-8")
+        self.send_response(200)
+        self.send_header("Content-Type", "application/json; charset=utf-8")
+        self.send_header("Content-Length", str(len(payload)))
+        self.send_header("Cache-Control", "no-cache, no-store, must-revalidate")
+        self.end_headers()
+        if method != "HEAD":
+            self.wfile.write(payload)
+
     def do_GET(self):
         clean_path = self.path.split("?")[0]
+        if clean_path in ["/health", "/healthz", "/status", "/ping"]:
+            self._handle_health_check(method="GET")
+            return
+
         if clean_path in ["/__probe", "/log", "/telemetry"]:
             self.send_response(204)
             self.end_headers()
@@ -107,6 +129,10 @@ class CyberpunkHTTPHandler(http.server.SimpleHTTPRequestHandler):
 
     def do_HEAD(self):
         clean_path = self.path.split("?")[0]
+        if clean_path in ["/health", "/healthz", "/status", "/ping"]:
+            self._handle_health_check(method="HEAD")
+            return
+
         if clean_path in ["/__probe", "/log", "/telemetry"]:
             self.send_response(204)
             self.end_headers()
@@ -303,6 +329,7 @@ def main():
         print("==============================================================")
         print(f" > Local URL:       {url}")
         print(f" > Game Launcher:   {url}/game")
+        print(f" > Health Check:    {url}/health")
         print(f" > Headers Active:  COOP (same-origin), COEP (require-corp)")
         print(f" > Upstream Worker: {UPSTREAM_WORKER}")
         print(f" > Origin Spoof:    {ORIGIN_SPOOF}")
