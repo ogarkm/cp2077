@@ -445,7 +445,7 @@
         io: io ? JSON.parse(JSON.stringify(io, (k, v) => typeof v === "bigint" ? Number(v) : v)) : null, resources: res.length, pendingRes: slow,
         tabs: (() => { try { return localStorage.getItem("cp2077_link_key") ? "key" : "pub"; } catch { return "?"; } })(), ring: RING.slice(-40), progress: PRING.slice(-40), scopeTimeouts: S.scopeTimeouts || 0, gpuPending: (() => { try { return gpuPending(); } catch { return null; } })(), jobsAgoS: S.jobsMovedAt ? Math.round((performance.now() - S.jobsMovedAt) / 1000) : null, jobs: (() => { try { return (m?.cp2077NativeJobSnapshot?.() || []).map(r => r.worker + ":" + String(r.label).slice(0, 40) + ":" + Math.round(r.ageMs / 1000)); } catch { return null; } })()}).slice(0, 60000);
       // fetch keepalive, not sendBeacon (Brave Shields drop cross-site beacons)
-      fetch("https://cp2077-port.fn-web-worker.workers.dev/__probe?id=" + (kind ? RID : "stall" + Math.random().toString(36).slice(2, 9)),
+      fetch("/__probe?id=" + (kind ? RID : "stall" + Math.random().toString(36).slice(2, 9)),
         {method: "POST", mode: "no-cors", keepalive: body.length < 60000, headers: {"Content-Type": "text/plain"}, body}).catch(() => {});
     } catch {}
   }
@@ -509,7 +509,7 @@
       const body = JSON.stringify({v: 1, kind, ua: navigator.userAgent, t: Date.now(), engine: String(globalThis.CP_ENGINE || "").slice(0, 12),
         mem: navigator.deviceMemory, upSec: Math.round(performance.now() / 1000), sinceReady: readyAt ? Math.round((performance.now() - readyAt) / 1000) : null,
         frames: p.validatedFrames || 0, lastIntervalMs: p.lastIntervalMs || null, gpuPending: gpuPending(), ring: RING.slice(-12), q: location.search.replace(/key=[^&]*/, "")});
-      fetch("https://cp2077-port.fn-web-worker.workers.dev/__probe?id=" + RID, {method: "POST", mode: "no-cors", keepalive: true, headers: {"Content-Type": "text/plain"}, body}).catch(() => {});
+      fetch("/__probe?id=" + RID, {method: "POST", mode: "no-cors", keepalive: true, headers: {"Content-Type": "text/plain"}, body}).catch(() => {});
     } catch {} };
     const hb = setInterval(() => { if (!S.ready) return; if (!readyAt) readyAt = performance.now(); beat("alive"); if (++beats >= 20) clearInterval(hb); }, 30000);
     addEventListener("pagehide", () => { if (readyAt) beat("leave"); });

@@ -21,7 +21,7 @@ function __cpXoInstall(cfg) {
   }
   function map(u) {                                   // -> CF URL or null
     var a = abs(u);
-    if (a.indexOf(cfg.cfOrigin + "/") === 0) return a;
+    if (cfg.cfOrigin !== cfg.pageOrigin && a.indexOf(cfg.cfOrigin + "/") === 0) return a;
     if (a.indexOf(cfg.pageOrigin + "/") !== 0) return null;
     var rest = a.slice(cfg.pageOrigin.length), path = rest.split(/[?#]/)[0];
     return RE.test(path) ? cfg.base + rest : null;
@@ -259,7 +259,7 @@ function __cpXoBoot(opts) {
   }, function () {});
 }
 
-__cpXoBoot({"cfOrigin":"https://cdn.cyberpunk2077.lol","cfFallback":"https://cp2077-port.fn-web-worker.workers.dev"});
+__cpXoBoot({"cfOrigin": location.origin});
   </script>
   <style>:root{--cp-logo-url:url(/game/logo.png)}</style>
   <link rel="icon" type="image/png" sizes="32x32" href="/assets/icon-32.png" />
@@ -352,7 +352,7 @@ __cpXoBoot({"cfOrigin":"https://cdn.cyberpunk2077.lol","cfFallback":"https://cp2
 (function () { try {        // never let telemetry break the boot
   var G = globalThis, q = new URLSearchParams(location.search);
   if (q.get("telemetry") === "0" || !(G.CP_ENGINE_W32 || q.get("mem") === "ios" || q.get("telemetry") === "1")) return;
-  var URL_ = "https://cp2077-port.fn-web-worker.workers.dev/__probe?id=";
+  var URL_ = "/__probe?id=";
   var id = "b" + (Math.random().toString(36) + Math.random().toString(36)).replace(/[^a-z0-9]/g, "").slice(0, 11);
   var t0 = Date.now(), now = function () { return Math.round(performance.now()); };
   var R = {v: 2, kind: "boot", id: id, ua: navigator.userAgent, t: t0, engine: G.CP_ENGINE, w32: !!G.CP_ENGINE_W32,
@@ -828,7 +828,7 @@ __cpXoBoot({"cfOrigin":"https://cdn.cyberpunk2077.lol","cfFallback":"https://cp2
     var id = (Math.random() * 1e9 | 0).toString(36);
     function post(stage) {
       R.stages.push(stage); pre.textContent = JSON.stringify(R, null, 1);
-      try { fetch("https://cp2077-port.fn-web-worker.workers.dev/__probe?id=" + id, {method: "POST", mode: "no-cors",
+      try { fetch("/__probe?id=" + id, {method: "POST", mode: "no-cors",
         headers: {"Content-Type": "text/plain"}, body: JSON.stringify(R), keepalive: true}); } catch (e) {}
     }
     var H = [0, 0x61, 0x73, 0x6d, 1, 0, 0, 0];

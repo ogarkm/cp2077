@@ -10,7 +10,9 @@ Features:
   * Cross-Origin-Resource-Policy: cross-origin
 - Full HTTP 206 Partial Content (Range request) support for smooth video & wasm streaming.
 - Auto-routing: maps '/game' seamlessly to 'game/index.html'.
-- Reverse proxy fallback to upstream (cyberpunk2077.lol) for non-local runtime assets.
+- Upstream reverse proxy to Cloudflare R2 worker (cp2077-port.fn-web-worker.workers.dev)
+  with Origin/Referer spoofing to bypass CORS restrictions.
+- Handles both gated paths (/k/play/...) and direct (/runtime/..., /game/archive/...).
 - Production-ready for Render (binds to $PORT).
 """
 
@@ -25,7 +27,8 @@ import re
 
 PORT = int(os.environ.get("PORT", 8080))
 HOST = os.environ.get("HOST", "0.0.0.0")
-TARGET_ORIGIN = os.environ.get("TARGET_ORIGIN", "https://cyberpunk2077.lol").rstrip("/")
+UPSTREAM_WORKER = os.environ.get("UPSTREAM_WORKER", "https://cp2077-port.fn-web-worker.workers.dev").rstrip("/")
+ORIGIN_SPOOF = os.environ.get("ORIGIN_SPOOF", "https://cyberpunk2077.lol")
 
 # Ensure correct MIME types
 mimetypes.add_type("application/wasm", ".wasm")
@@ -39,7 +42,7 @@ mimetypes.add_type("text/css", ".css")
 mimetypes.add_type("application/json", ".json")
 
 class CyberpunkHTTPHandler(http.server.SimpleHTTPRequestHandler):
-    server_version = "CyberpunkServer/1.0"
+    server_version = "CyberpunkServer/1.1"
 
     def end_headers(self):
         # Mandatory headers for WebAssembly multi-threading (SharedArrayBuffer) & WebGPU
@@ -49,7 +52,7 @@ class CyberpunkHTTPHandler(http.server.SimpleHTTPRequestHandler):
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS, HEAD")
         self.send_header("Access-Control-Allow-Headers", "Range, Content-Type, Authorization, X-Requested-With")
-        self.send_header("Access-Control-Expose-Headers", "Content-Range, Content-Length, Accept-Ranges")
+        self.send_header("Access-Control-Expose-Headers", "Content-Range, Content-Length, Accept-Ranges, ETag")
         super().end_headers()
 
     def do_OPTIONS(self):
@@ -57,7 +60,6 @@ class CyberpunkHTTPHandler(http.server.SimpleHTTPRequestHandler):
         self.end_headers()
 
     def do_POST(self):
-        # Ignore telemetry/probe endpoints gracefully or proxy
         clean_path = self.path.split("?")[0]
         if clean_path in ["/__probe", "/log", "/telemetry"]:
             content_length = int(self.headers.get("Content-Length", 0))
@@ -89,15 +91,27 @@ class CyberpunkHTTPHandler(http.server.SimpleHTTPRequestHandler):
         return None
 
     def do_GET(self):
+        clean_path = self.path.split("?")[0]
+        if clean_path in ["/__probe", "/log", "/telemetry"]:
+            self.send_response(204)
+            self.end_headers()
+            return
+
         local_file = self._resolve_local_file()
         if local_file:
             self._serve_file(local_file, method="GET")
             return
 
-        # Upstream fallback proxy
+        # Upstream proxy for runtime assets / game data / wasm
         self._proxy_request("GET")
 
     def do_HEAD(self):
+        clean_path = self.path.split("?")[0]
+        if clean_path in ["/__probe", "/log", "/telemetry"]:
+            self.send_response(204)
+            self.end_headers()
+            return
+
         local_file = self._resolve_local_file()
         if local_file:
             self._serve_file(local_file, method="HEAD")
@@ -167,13 +181,37 @@ class CyberpunkHTTPHandler(http.server.SimpleHTTPRequestHandler):
         except Exception as e:
             self.send_error(500, f"Internal file read error: {e}")
 
+    def _determine_target_url(self):
+        """Construct the upstream Cloudflare worker target URL."""
+        # Paths that already include the /k/<token> prefix or root endpoints
+        if self.path.startswith("/k/") or self.path.startswith("/__launch") or self.path.startswith("/__probe"):
+            return f"{UPSTREAM_WORKER}{self.path}"
+
+        # Paths that require the /k/play gate prefix on the worker
+        if self.path.startswith("/runtime/") or self.path.startswith("/game/archive/") or \
+           self.path.startswith("/game/engine/") or self.path.startswith("/game/r6/") or \
+           self.path.startswith("/sdk/"):
+            return f"{UPSTREAM_WORKER}/k/play{self.path}"
+
+        # Default fallback
+        return f"{UPSTREAM_WORKER}{self.path}"
+
     def _proxy_request(self, method):
-        """Proxy missing assets and API calls to upstream."""
-        target_url = f"{TARGET_ORIGIN}{self.path}"
-        headers = {}
-        for key in ["Range", "Content-Type", "Accept", "User-Agent", "Accept-Encoding"]:
+        """Proxy missing assets, wasm bundles, and API calls to upstream Cloudflare worker."""
+        target_url = self._determine_target_url()
+        user_agent = self.headers.get("User-Agent") or "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36"
+
+        req_headers = {
+            "Origin": ORIGIN_SPOOF,
+            "Referer": f"{ORIGIN_SPOOF}/",
+            "User-Agent": user_agent,
+            "Accept": self.headers.get("Accept", "*/*"),
+            "Accept-Encoding": "identity",
+        }
+
+        for key in ["Range", "If-None-Match", "If-Match", "If-Modified-Since", "Content-Type"]:
             if key in self.headers:
-                headers[key] = self.headers[key]
+                req_headers[key] = self.headers[key]
 
         body = None
         if method == "POST":
@@ -181,24 +219,48 @@ class CyberpunkHTTPHandler(http.server.SimpleHTTPRequestHandler):
             if content_length > 0:
                 body = self.rfile.read(content_length)
 
-        req = urllib.request.Request(target_url, data=body, headers=headers, method=method)
+        req = urllib.request.Request(target_url, data=body, headers=req_headers, method=method)
 
         try:
-            with urllib.request.urlopen(req, timeout=30) as resp:
+            with urllib.request.urlopen(req, timeout=60) as resp:
                 self.send_response(resp.status)
-                for header_key in ["Content-Type", "Content-Length", "Content-Range", "Accept-Ranges", "ETag", "Last-Modified"]:
+                for header_key in ["Content-Type", "Content-Length", "Content-Range", "Accept-Ranges", "ETag", "Last-Modified", "Cache-Control"]:
                     val = resp.headers.get(header_key)
                     if val is not None:
                         self.send_header(header_key, val)
                 self.end_headers()
 
                 if method != "HEAD":
+                    chunk_size = 128 * 1024
                     while True:
-                        chunk = resp.read(64 * 1024)
+                        chunk = resp.read(chunk_size)
                         if not chunk:
                             break
                         self.wfile.write(chunk)
         except urllib.error.HTTPError as e:
+            # If a direct path failed with 401/404, try with /k/play prefix if not already present
+            if e.code in [401, 404] and "/k/" not in target_url:
+                retry_url = f"{UPSTREAM_WORKER}/k/play{self.path}"
+                try:
+                    retry_req = urllib.request.Request(retry_url, data=body, headers=req_headers, method=method)
+                    with urllib.request.urlopen(retry_req, timeout=60) as resp:
+                        self.send_response(resp.status)
+                        for header_key in ["Content-Type", "Content-Length", "Content-Range", "Accept-Ranges", "ETag", "Last-Modified", "Cache-Control"]:
+                            val = resp.headers.get(header_key)
+                            if val is not None:
+                                self.send_header(header_key, val)
+                        self.end_headers()
+                        if method != "HEAD":
+                            chunk_size = 128 * 1024
+                            while True:
+                                chunk = resp.read(chunk_size)
+                                if not chunk:
+                                    break
+                                self.wfile.write(chunk)
+                        return
+                except Exception:
+                    pass
+
             self.send_response(e.code)
             for header_key in ["Content-Type", "Content-Length", "Content-Range", "Accept-Ranges"]:
                 val = e.headers.get(header_key)
@@ -209,6 +271,8 @@ class CyberpunkHTTPHandler(http.server.SimpleHTTPRequestHandler):
                 err_body = e.read()
                 if err_body:
                     self.wfile.write(err_body)
+        except (ConnectionResetError, BrokenPipeError):
+            pass
         except Exception as e:
             self.send_response(502)
             self.end_headers()
@@ -240,7 +304,8 @@ def main():
         print(f" > Local URL:       {url}")
         print(f" > Game Launcher:   {url}/game")
         print(f" > Headers Active:  COOP (same-origin), COEP (require-corp)")
-        print(f" > Upstream Proxy:  {TARGET_ORIGIN}")
+        print(f" > Upstream Worker: {UPSTREAM_WORKER}")
+        print(f" > Origin Spoof:    {ORIGIN_SPOOF}")
         print("--------------------------------------------------------------")
         print(" Press Ctrl+C to stop.")
         print("==============================================================")

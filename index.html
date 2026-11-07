@@ -184,7 +184,7 @@
   // Launch countdown (same time as the /game page and the Worker gate: 2026-10-22 17:00 CT = 22:00 UTC).
   let LAUNCH = Date.parse("2026-10-22T22:00:00Z"), skew = 0;
   const soon = document.getElementById("soon"), sub = document.getElementById("soon-sub");
-  fetch("https://cp2077-port.fn-web-worker.workers.dev/__launch", {cache: "no-store"}).then(r => r.json())
+  fetch("/__launch", {cache: "no-store"}).then(r => r.json())
     .then(j => { if (j && j.now) { skew = j.now - Date.now(); if (j.launch) LAUNCH = j.launch; tick(); } }).catch(() => {});
   const p2 = n => String(n).padStart(2, "0");
   function tick() {
